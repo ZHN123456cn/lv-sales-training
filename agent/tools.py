@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import fnmatch
 import json
+import locale
 import os
 import subprocess
 from dataclasses import dataclass, field
@@ -330,15 +331,14 @@ def shell(args: dict, ctx: ToolContext) -> str:
             command,
             shell=True,
             capture_output=True,
-            text=True,
             timeout=timeout,
             cwd=str(ctx.work_dir),
         )
         output_parts = []
         if result.stdout:
-            output_parts.append(result.stdout)
+            output_parts.append(_decode_process_output(result.stdout))
         if result.stderr:
-            output_parts.append(f"[stderr]\n{result.stderr}")
+            output_parts.append(f"[stderr]\n{_decode_process_output(result.stderr)}")
         if result.returncode != 0:
             output_parts.append(f"[退出码] {result.returncode}")
         return "\n".join(output_parts) if output_parts else "(命令执行成功，无输出)"
@@ -423,3 +423,25 @@ def _human_size(size: int) -> str:
             return f"{size:.0f} {unit}"
         size //= 1024
     return f"{size:.0f} TB"
+
+
+def _decode_process_output(data: bytes | str) -> str:
+    """Decode subprocess output across UTF-8 and Windows locale encodings."""
+    if isinstance(data, str):
+        return data
+    if not data:
+        return ""
+
+    encodings = ["utf-8", locale.getpreferredencoding(False), "gbk"]
+    seen: set[str] = set()
+    for encoding in encodings:
+        normalized = encoding.lower()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        try:
+            return data.decode(encoding)
+        except (LookupError, UnicodeDecodeError):
+            continue
+
+    return data.decode("utf-8", errors="replace")

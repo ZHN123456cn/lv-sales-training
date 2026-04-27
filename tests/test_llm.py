@@ -13,7 +13,11 @@ import json
 
 import pytest
 
-from agent.llm import _BlockingLLMResponse, _StreamingLLMResponse
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+from agent.config import LLMConfig
+from agent.llm import LLMClient, _BlockingLLMResponse, _StreamingLLMResponse, prepare_messages_for_provider
 from tests.conftest import (
     make_blocking_completion,
     make_streaming_chunks,
@@ -74,6 +78,27 @@ class TestBlockingLLMResponse:
         msg = resp.to_message()
         assert "tool_calls" in msg
         assert msg["tool_calls"][0]["function"]["name"] == "list_dir"
+
+    def test_to_message_preserves_reasoning_content(self):
+        """to_message() 保留 provider 返回的 reasoning_content，供 provider adapter 决定是否回传。"""
+        comp = make_blocking_completion(
+            "",
+            tool_calls=[{"id": "call_r", "name": "skill_read", "arguments": '{"name":"weather"}'}],
+            reasoning_content="模型内部思考状态",
+        )
+        resp = _BlockingLLMResponse(comp)
+        msg = resp.to_message()
+        assert msg["reasoning_content"] == "模型内部思考状态"
+
+    def test_to_message_reads_reasoning_content_from_model_extra(self):
+        """OpenAI SDK 可能把 provider 扩展字段放在 model_extra。"""
+        comp = make_blocking_completion("answer")
+        comp.choices[0].message.model_extra = {"reasoning_content": "extra reasoning"}
+        resp = _BlockingLLMResponse(comp)
+
+        msg = resp.to_message()
+
+        assert msg["reasoning_content"] == "extra reasoning"
 
     def test_stream_text_yields_content(self):
         """stream_text() 在阻塞响应中 yield 完整内容字符串。"""
@@ -142,3 +167,145 @@ class TestStreamingLLMResponse:
         msg = resp.to_message()
         assert "tool_calls" in msg
         assert msg["tool_calls"][0]["function"]["name"] == "search_files"
+
+
+# ---------------------------------------------------------------------------
+# Provider-aware message preparation
+# ---------------------------------------------------------------------------
+
+class TestPrepareMessagesForProvider:
+    def test_deepseek_preserves_assistant_reasoning_content(self):
+        messages = [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "天气"},
+            {
+                "role": "assistant",
+                "reasoning_content": "需要调用 weather skill",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "skill_read", "arguments": '{"name":"weather"}'},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "..."},
+        ]
+
+        prepared = prepare_messages_for_provider(messages, "deepseek")
+
+        assert prepared[2]["reasoning_content"] == "需要调用 weather skill"
+        assert "reasoning_content" not in prepared[0]
+        assert "reasoning_content" not in prepared[1]
+        assert "reasoning_content" not in prepared[3]
+
+    def test_deepseek_drops_legacy_assistant_missing_reasoning_content(self):
+        messages = [
+            {"role": "user", "content": "first"},
+            {
+                "role": "assistant",
+                "reasoning_content": "reason",
+                "tool_calls": [
+                    {
+                        "id": "c1",
+                        "type": "function",
+                        "function": {"name": "skill_read", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "c1", "content": "skill"},
+            {"role": "assistant", "content": "legacy final without reasoning"},
+            {"role": "user", "content": "follow up"},
+        ]
+
+        prepared = prepare_messages_for_provider(messages, "deepseek")
+
+        assert {"role": "assistant", "content": "legacy final without reasoning"} not in prepared
+        assert prepared[-1] == {"role": "user", "content": "follow up"}
+        assert any(m.get("tool_call_id") == "c1" for m in prepared)
+
+    def test_deepseek_drops_orphan_tool_when_legacy_tool_call_is_removed(self):
+        messages = [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "reasoning_content": "reason", "content": "ok"},
+            {
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": "missing_reason",
+                        "type": "function",
+                        "function": {"name": "skill_read", "arguments": "{}"},
+                    }
+                ],
+            },
+            {"role": "tool", "tool_call_id": "missing_reason", "content": "orphan"},
+            {"role": "user", "content": "follow up"},
+        ]
+
+        prepared = prepare_messages_for_provider(messages, "deepseek")
+
+        assert not any(m.get("tool_call_id") == "missing_reason" for m in prepared)
+
+    def test_non_deepseek_strips_reasoning_content(self):
+        messages = [
+            {
+                "role": "assistant",
+                "content": "answer",
+                "reasoning_content": "provider-specific",
+            }
+        ]
+
+        prepared = prepare_messages_for_provider(messages, "openai")
+
+        assert prepared == [{"role": "assistant", "content": "answer"}]
+
+    def test_prepare_messages_does_not_mutate_input(self):
+        messages = [
+            {
+                "role": "assistant",
+                "content": "answer",
+                "reasoning_content": "provider-specific",
+            }
+        ]
+
+        prepare_messages_for_provider(messages, "openai")
+
+        assert messages[0]["reasoning_content"] == "provider-specific"
+
+
+class TestLLMClientProviderPreparation:
+    def test_chat_strips_reasoning_for_non_deepseek_provider(self):
+        completion = make_blocking_completion("ok")
+        create = MagicMock(return_value=completion)
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        cfg = LLMConfig(provider="openai", api_key="test", streaming=False)
+
+        with patch("agent.llm.OpenAI", return_value=fake_client):
+            client = LLMClient(cfg)
+            client.chat([
+                {"role": "assistant", "content": "x", "reasoning_content": "secret"}
+            ])
+
+        sent_messages = create.call_args.kwargs["messages"]
+        assert sent_messages == [{"role": "assistant", "content": "x"}]
+
+    def test_chat_preserves_reasoning_for_deepseek_provider(self):
+        completion = make_blocking_completion("ok")
+        create = MagicMock(return_value=completion)
+        fake_client = SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+        cfg = LLMConfig(provider="deepseek", api_key="test", streaming=False)
+
+        with patch("agent.llm.OpenAI", return_value=fake_client):
+            client = LLMClient(cfg)
+            client.chat([
+                {"role": "assistant", "content": "x", "reasoning_content": "state"}
+            ])
+
+        sent_messages = create.call_args.kwargs["messages"]
+        assert sent_messages == [
+            {"role": "assistant", "content": "x", "reasoning_content": "state"}
+        ]

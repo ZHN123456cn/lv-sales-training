@@ -125,7 +125,11 @@ def session_with_messages() -> Session:
 # LLM mock 辅助函数
 # ---------------------------------------------------------------------------
 
-def make_blocking_completion(content: str, tool_calls: list[dict] | None = None) -> Any:
+def make_blocking_completion(
+    content: str,
+    tool_calls: list[dict] | None = None,
+    reasoning_content: str | None = None,
+) -> Any:
     """
     构造一个仿 OpenAI ChatCompletion 对象（非流式）。
 
@@ -136,6 +140,8 @@ def make_blocking_completion(content: str, tool_calls: list[dict] | None = None)
         content=content,
         tool_calls=None,
     )
+    if reasoning_content is not None:
+        msg.reasoning_content = reasoning_content
     if tool_calls:
         msg.tool_calls = [
             SimpleNamespace(

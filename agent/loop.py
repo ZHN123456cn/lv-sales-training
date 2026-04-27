@@ -200,11 +200,10 @@ class AgentLoop:
                 for token in response.stream_text():
                     full_text_parts.append(token)
                     yield token
-                # 将完整回答写入 messages
-                self._session.messages.append({
-                    "role": "assistant",
-                    "content": "".join(full_text_parts),
-                })
+                # 将完整回答写入 messages，同时保留 provider-specific 字段。
+                message = response.to_message()
+                message["content"] = "".join(full_text_parts)
+                self._session.messages.append(message)
                 return
 
             # 工具调用阶段（不流式）

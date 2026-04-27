@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from agent.tools import ToolContext, execute_tool, TOOL_REGISTRY
+from agent.tools import ToolContext, execute_tool, TOOL_REGISTRY, _decode_process_output
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +202,14 @@ class TestShell:
         result = execute_tool("shell", {"command": "cd"}, tool_ctx)
         # Windows cd 输出当前目录
         assert str(tmp_work_dir).lower() in result.lower() or result.strip() != ""
+
+    def test_decode_process_output_utf8(self):
+        """subprocess 输出支持 UTF-8。"""
+        assert _decode_process_output("成都 ☔".encode("utf-8")) == "成都 ☔"
+
+    def test_decode_process_output_gbk_fallback(self):
+        """subprocess 输出在 UTF-8 失败时回退到 GBK。"""
+        assert _decode_process_output("成都天气".encode("gbk")) == "成都天气"
 
 
 # ---------------------------------------------------------------------------

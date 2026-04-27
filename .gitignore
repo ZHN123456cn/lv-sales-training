@@ -1,5 +1,6 @@
 .env
 .sessions/
+skills/
 __pycache__/
 .pytest_cache/
 *.pyc

@@ -50,10 +50,11 @@ class LLMClient:
             LLMResponse 对象，可判断是否含 tool_calls，也可迭代流式 token
         """
         use_stream = self._config.streaming if stream is None else stream
+        api_messages = prepare_messages_for_provider(messages, self._config.provider)
 
         kwargs: dict[str, Any] = {
             "model": self._config.model,
-            "messages": messages,
+            "messages": api_messages,
             "temperature": self._config.temperature,
             "stream": use_stream,
         }
@@ -149,6 +150,9 @@ class _BlockingLLMResponse(LLMResponse):
         msg: dict[str, Any] = {"role": "assistant"}
         if self._msg.content:
             msg["content"] = self._msg.content
+        reasoning_content = _get_provider_extra(self._msg, "reasoning_content")
+        if reasoning_content:
+            msg["reasoning_content"] = reasoning_content
         if self._msg.tool_calls:
             msg["tool_calls"] = [
                 {
@@ -172,10 +176,11 @@ class _StreamingLLMResponse(LLMResponse):
 
     def __init__(self, stream: Any) -> None:
         self._chunks: list[Any] = list(stream)
-        self._content, self._raw_tool_calls = self._parse_chunks()
+        self._content, self._reasoning_content, self._raw_tool_calls = self._parse_chunks()
 
-    def _parse_chunks(self) -> tuple[str, list[dict[str, Any]]]:
+    def _parse_chunks(self) -> tuple[str, str, list[dict[str, Any]]]:
         content_parts: list[str] = []
+        reasoning_parts: list[str] = []
         # tool_calls 是按 index 拆开流式发送的，需要合并
         tc_map: dict[int, dict[str, Any]] = {}
 
@@ -185,6 +190,9 @@ class _StreamingLLMResponse(LLMResponse):
                 continue
             if delta.content:
                 content_parts.append(delta.content)
+            reasoning_content = _get_provider_extra(delta, "reasoning_content")
+            if reasoning_content:
+                reasoning_parts.append(reasoning_content)
             if delta.tool_calls:
                 for tc_delta in delta.tool_calls:
                     idx = tc_delta.index
@@ -203,7 +211,7 @@ class _StreamingLLMResponse(LLMResponse):
                             tc_map[idx]["function"]["arguments"] += tc_delta.function.arguments
 
         raw_tool_calls = [tc_map[i] for i in sorted(tc_map)]
-        return "".join(content_parts), raw_tool_calls
+        return "".join(content_parts), "".join(reasoning_parts), raw_tool_calls
 
     @property
     def content(self) -> str:
@@ -235,6 +243,80 @@ class _StreamingLLMResponse(LLMResponse):
         msg: dict[str, Any] = {"role": "assistant"}
         if self._content:
             msg["content"] = self._content
+        if self._reasoning_content:
+            msg["reasoning_content"] = self._reasoning_content
         if self._raw_tool_calls:
             msg["tool_calls"] = self._raw_tool_calls
         return msg
+
+
+def prepare_messages_for_provider(
+    messages: list[dict[str, Any]],
+    provider: str,
+) -> list[dict[str, Any]]:
+    """Return provider-compatible messages without mutating session history."""
+    if _is_deepseek_provider(provider):
+        return _prepare_deepseek_messages(messages)
+    return [_strip_provider_reasoning_fields(m) for m in messages]
+
+
+def _is_deepseek_provider(provider: str) -> bool:
+    return provider.strip().lower() == "deepseek"
+
+
+def _prepare_deepseek_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    has_reasoning_history = any(
+        m.get("role") == "assistant" and bool(m.get("reasoning_content"))
+        for m in messages
+    )
+    prepared: list[dict[str, Any]] = []
+    valid_tool_call_ids: set[str] = set()
+
+    for message in messages:
+        msg = _prepare_deepseek_message(message)
+        if msg.get("role") == "assistant" and has_reasoning_history and not msg.get("reasoning_content"):
+            # Legacy sessions may contain assistant messages created before we
+            # preserved DeepSeek reasoning_content. They cannot be repaired, and
+            # DeepSeek rejects them in thinking mode, so omit them at API time.
+            continue
+        for tool_call in msg.get("tool_calls") or []:
+            call_id = tool_call.get("id")
+            if isinstance(call_id, str) and call_id:
+                valid_tool_call_ids.add(call_id)
+        prepared.append(msg)
+
+    if not valid_tool_call_ids:
+        return [m for m in prepared if m.get("role") != "tool"]
+
+    return [
+        m for m in prepared
+        if m.get("role") != "tool" or m.get("tool_call_id") in valid_tool_call_ids
+    ]
+
+
+def _prepare_deepseek_message(message: dict[str, Any]) -> dict[str, Any]:
+    msg = dict(message)
+    if msg.get("role") != "assistant":
+        msg.pop("reasoning_content", None)
+        return msg
+    if not msg.get("reasoning_content"):
+        msg.pop("reasoning_content", None)
+    return msg
+
+
+def _strip_provider_reasoning_fields(message: dict[str, Any]) -> dict[str, Any]:
+    msg = dict(message)
+    msg.pop("reasoning_content", None)
+    return msg
+
+
+def _get_provider_extra(obj: Any, field: str) -> Any:
+    value = getattr(obj, field, None)
+    if value is not None:
+        return value
+    model_extra = getattr(obj, "model_extra", None)
+    if isinstance(model_extra, dict):
+        return model_extra.get(field)
+    if isinstance(obj, dict):
+        return obj.get(field)
+    return None

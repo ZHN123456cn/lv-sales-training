@@ -54,6 +54,18 @@ def streaming_resp(content: str) -> _StreamingLLMResponse:
     return _StreamingLLMResponse(make_streaming_chunks(content))
 
 
+def streaming_resp_with_reasoning(content: str, reasoning: str) -> _StreamingLLMResponse:
+    from types import SimpleNamespace
+
+    chunks = []
+    delta_reasoning = SimpleNamespace(content=None, reasoning_content=reasoning, tool_calls=None)
+    chunks.append(SimpleNamespace(choices=[SimpleNamespace(delta=delta_reasoning)]))
+    for ch in content:
+        delta = SimpleNamespace(content=ch, reasoning_content=None, tool_calls=None)
+        chunks.append(SimpleNamespace(choices=[SimpleNamespace(delta=delta)]))
+    return _StreamingLLMResponse(chunks)
+
+
 def tool_call_resp(tool_id: str, tool_name: str, args_json: str) -> _BlockingLLMResponse:
     tc = [{"id": tool_id, "name": tool_name, "arguments": args_json}]
     return _BlockingLLMResponse(make_blocking_completion("", tool_calls=tc))
@@ -334,6 +346,21 @@ class TestStreamRun:
         list(loop.stream_run("问题"))  # 消费 generator
         assistant_msgs = [m for m in empty_session.messages if m["role"] == "assistant"]
         assert any("完整回答" in m.get("content", "") for m in assistant_msgs)
+
+    def test_stream_run_preserves_reasoning_content(
+        self, default_config: AgentConfig, empty_session: Session
+    ):
+        """stream_run() 保存最终回答时不丢 provider-specific reasoning_content。"""
+        default_config.llm.streaming = True
+        resp = streaming_resp_with_reasoning("回答", "stream reasoning")
+        llm = make_mock_llm(resp)
+        loop = make_loop(default_config, empty_session, llm)
+
+        list(loop.stream_run("问题"))
+
+        assistant_msgs = [m for m in empty_session.messages if m["role"] == "assistant"]
+        assert assistant_msgs[-1]["content"] == "回答"
+        assert assistant_msgs[-1]["reasoning_content"] == "stream reasoning"
 
 
 # ---------------------------------------------------------------------------
