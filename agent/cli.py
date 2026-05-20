@@ -119,7 +119,7 @@ HELP_TEXT = """
   /memory search <q>   搜索长期记忆与每日记忆
   /memory status       显示 FTS5 / sqlite-vec / embedding 状态
   /memory reindex      从 Markdown 真源强制重建 FTS5 与向量索引
-  /memory promote <id> <scope>
+  /memory promote <id>
                        将指定每日记忆晋升到长期记忆
   /config              显示当前配置
   /cd <path>           切换工作目录
@@ -463,16 +463,16 @@ class CLI:
             import json as _json
             print(_json.dumps(store.index_status(), ensure_ascii=False, indent=2))
         elif sub == "promote":
-            if len(args) < 3:
-                self._err_print("用法：/memory promote <daily-item-id> <scope>")
+            if len(args) < 2:
+                self._err_print("用法：/memory promote <daily-item-id>")
                 return
             try:
-                promoted_id = store.promote_daily(args[1], args[2], "CLI manual promotion")
+                promoted_id = store.promote_daily(args[1], "CLI manual promotion")
                 self._sys_print(f"已晋升为长期记忆：{promoted_id}")
             except Exception as e:
                 self._err_print(f"晋升失败：{e}")
         else:
-            self._err_print("用法：/memory show | daily [YYYY-MM-DD] | search <query> | status | reindex | promote <id> <scope>")
+            self._err_print("用法：/memory show | daily [YYYY-MM-DD] | search <query> | status | reindex | promote <id>")
 
     def _print_memory(self) -> None:
         store = self._loop.memory_store

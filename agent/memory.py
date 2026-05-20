@@ -28,7 +28,6 @@ MemoryScope = str
 MemoryTier = str
 MemorySource = str
 
-VALID_SCOPES = {"user", "project", "session"}
 VALID_TIERS = {"long_term", "daily"}
 VALID_SOURCES = {
     "explicit_user_request",
@@ -41,7 +40,7 @@ LONG_TERM_SOURCES = {
     "model_inferred_stable_fact",
     "promoted_daily_memory",
 }
-SKELETON = "# Agent Memory\n\n## user\n\n## project\n\n## session\n"
+SKELETON = "# Agent Memory\n"
 
 
 @dataclass(frozen=True)
@@ -59,7 +58,6 @@ class MemoryItem:
     text: str
     created_at: str
     source: str
-    scope: str | None = None
     reason: str | None = None
     daily_date: str | None = None
     recall_count: int = 0
@@ -173,14 +171,13 @@ class MarkdownMemoryStore:
         path = self.ensure_daily_file(day)
         return path.read_text(encoding="utf-8", errors="replace")
 
-    def add_text(self, scope: str, text: str, source: str, reason: str) -> MemoryWriteResult:
-        return self.add_long_term(scope, text, source, reason)
+    def add_text(self, text: str, source: str, reason: str) -> MemoryWriteResult:
+        return self.add_long_term(text, source, reason)
 
     def write_with_policy(
         self,
         text: str,
         source: str,
-        scope: str | None = None,
         reason: str | None = None,
     ) -> MemoryWriteResult:
         """按照保留策略决定写入长期记忆还是日记忆。
@@ -190,7 +187,6 @@ class MarkdownMemoryStore:
         """
         if source == "explicit_user_request":
             return self.add_long_term(
-                scope=str(scope or ""),
                 text=text,
                 source=source,
                 reason=str(reason or ""),
@@ -199,7 +195,6 @@ class MarkdownMemoryStore:
 
     def add_long_term(
         self,
-        scope: str,
         text: str,
         source: str,
         reason: str,
@@ -210,18 +205,16 @@ class MarkdownMemoryStore:
         校验放在生成 ID 和写文件之前，确保被拦截的写入不会留下半成品状态。
         Markdown 更新后，会在同一个锁保护区间内同步 upsert 派生的 SQLite 索引。
         """
-        scope = str(scope).strip()
         source = str(source).strip()
         text = _normalize_inline_text(text)
         reason = _normalize_inline_text(reason)
-        blocked_reason = self._validate_long_term_write(scope, text, source, reason)
+        blocked_reason = self._validate_long_term_write(text, source, reason)
         if blocked_reason:
             return MemoryWriteResult(blocked=True, reason=blocked_reason)
 
         item = MemoryItem(
             id=str(uuid.uuid4()),
             tier="long_term",
-            scope=scope,
             created_at=_now(),
             source=source,
             reason=reason,
@@ -268,7 +261,6 @@ class MarkdownMemoryStore:
         self,
         query: str,
         tier: str | None = None,
-        scope: str | None = None,
         max_results: int | None = None,
         max_snippet_chars: int | None = None,
     ) -> list[MemorySearchResult]:
@@ -283,14 +275,12 @@ class MarkdownMemoryStore:
             return []
         if tier and tier not in VALID_TIERS:
             return []
-        if scope and scope not in VALID_SCOPES:
-            return []
 
         max_results = max_results or self.config.search_max_results
         max_snippet_chars = max_snippet_chars or self.config.search_max_snippet_chars
 
-        fts_results = self._fts_search(query, tier=tier, scope=scope)
-        vector_results = self._vector_search(query, tier=tier, scope=scope)
+        fts_results = self._fts_search(query, tier=tier)
+        vector_results = self._vector_search(query, tier=tier)
         # 混合搜索是尽力而为：没有向量索引时关键词搜索仍可工作，向量不可用也不影响读取。
         if self.config.search_hybrid_enabled:
             merged = _merge_results(fts_results, vector_results)
@@ -310,7 +300,7 @@ class MarkdownMemoryStore:
         self._record_daily_recalls([r.item for r in results if r.item.tier == "daily"])
         return results
 
-    def promote_daily(self, item_id: str, scope: str, reason: str) -> str:
+    def promote_daily(self, item_id: str, reason: str) -> str:
         """将被反复召回的日记忆复制到长期记忆。
 
         晋升比普通日记忆写入更严格：调用方必须提供合法的长期作用域和 reason，
@@ -319,10 +309,7 @@ class MarkdownMemoryStore:
         """
         if not self.config.promotion_enabled:
             raise ValueError("promotion_disabled")
-        scope = str(scope).strip()
         reason = _normalize_inline_text(reason)
-        if scope not in VALID_SCOPES:
-            raise ValueError("scope_invalid")
         if not reason:
             raise ValueError("missing_reason")
 
@@ -335,7 +322,6 @@ class MarkdownMemoryStore:
             raise ValueError("promotion_threshold_not_met")
 
         write = self.add_long_term(
-            scope=scope,
             text=item.text,
             source="promoted_daily_memory",
             reason=reason,
@@ -387,10 +373,8 @@ class MarkdownMemoryStore:
                 items.extend(_parse_daily_items(path.read_text(encoding="utf-8", errors="replace"), path.stem))
         return items
 
-    def _validate_long_term_write(self, scope: str, text: str, source: str, reason: str) -> str | None:
+    def _validate_long_term_write(self, text: str, source: str, reason: str) -> str | None:
         """校验长期记忆写入；不合法时返回拦截原因，否则返回 None。"""
-        if scope not in VALID_SCOPES:
-            return "scope_invalid"
         if source not in {"explicit_user_request", "promoted_daily_memory"}:
             return "source_invalid"
         if source == "explicit_user_request" and not self.config.admission_explicit_user_intent:
@@ -563,7 +547,7 @@ class MarkdownMemoryStore:
                 (
                     item.id,
                     item.tier,
-                    item.scope,
+                    None,
                     item.created_at,
                     item.source,
                     item.reason,
@@ -610,7 +594,7 @@ class MarkdownMemoryStore:
                 )
             conn.commit()
 
-    def _fts_search(self, query: str, tier: str | None, scope: str | None) -> list[tuple[MemoryItem, float]]:
+    def _fts_search(self, query: str, tier: str | None) -> list[tuple[MemoryItem, float]]:
         """通过 FTS5 或基于 LIKE 的 fallback 执行关键词搜索。"""
         terms = _terms(query)
         if not terms or not self.config.search_keyword_enabled:
@@ -641,16 +625,13 @@ class MarkdownMemoryStore:
         if tier:
             sql += " AND e.tier = ?"
             params.append(tier)
-        if scope:
-            sql += " AND e.scope = ?"
-            params.append(scope)
         sql += " ORDER BY rank LIMIT ?"
         params.append(str(max(self.config.search_max_results * 4, 10)))
         with self._connect() as conn:
             rows = conn.execute(sql, params).fetchall()
         return [(_row_to_item(row), 1.0 / (1.0 + abs(float(row["rank"])))) for row in rows]
 
-    def _vector_search(self, query: str, tier: str | None, scope: str | None) -> list[tuple[MemoryItem, float]]:
+    def _vector_search(self, query: str, tier: str | None) -> list[tuple[MemoryItem, float]]:
         """使用 sqlite-vec 对记忆执行向量近邻搜索。"""
         # sqlite-vec 是可选依赖；不可用时直接返回空结果，让上层依赖关键词搜索兜底。
         if not self.config.search_vector_enabled:
@@ -674,9 +655,6 @@ class MarkdownMemoryStore:
             if tier:
                 sql += " AND e.tier = ?"
                 params.append(tier)
-            if scope:
-                sql += " AND e.scope = ?"
-                params.append(scope)
             sql += " ORDER BY distance"
             with self._connect() as conn:
                 rows = conn.execute(sql, params).fetchall()
@@ -790,24 +768,14 @@ def build_memory_store(config: AgentConfig) -> MarkdownMemoryStore | None:
 
 
 def _append_long_term_item(text: str, item: MemoryItem) -> str:
-    """把长期记忆追加到对应 scope 标题下，并保持 Markdown 文件结构稳定。
+    """把长期记忆追加到 MEMORY.md 末尾，并保持 Markdown 文件结构稳定。
 
-    这个函数只负责文本拼接，不做策略校验。调用前应已经确认 scope/source/reason
-    合法。插入位置是目标 ``## scope`` 段落的末尾、下一个二级标题之前。
+    这个函数只负责文本拼接，不做策略校验。调用前应已经确认 source/reason 合法。
+    长期记忆不再按 scope 分区，所有条目按追加顺序平铺在根标题下。
     """
     text = _ensure_skeleton_sections(text)
     lines = text.splitlines()
-    heading = f"## {item.scope}"
     insert_at = len(lines)
-    for i, line in enumerate(lines):
-        if line.strip() != heading:
-            continue
-        insert_at = len(lines)
-        for j in range(i + 1, len(lines)):
-            if lines[j].startswith("## "):
-                insert_at = j
-                break
-        break
     block = [
         f"- id: {item.id}",
         f"  created_at: {item.created_at}",
@@ -866,10 +834,10 @@ def _daily_block(item: MemoryItem) -> list[str]:
 
 
 def _ensure_skeleton_sections(text: str) -> str:
-    """确保长期记忆 Markdown 包含根标题和所有标准 scope 段落。
+    """确保长期记忆 Markdown 包含根标题。
 
-    用户可能手工编辑或清空 MEMORY.md。追加记忆前先补齐骨架，可以避免记忆被写到
-    错误位置，也让后续解析逻辑始终面对可预期的章节结构。
+    用户可能手工编辑或清空 MEMORY.md。追加记忆前先补齐根标题，可以避免文件缺少
+    基本结构。长期记忆不再按 scope 分节。
     """
     if not text.strip():
         return SKELETON
@@ -877,12 +845,6 @@ def _ensure_skeleton_sections(text: str) -> str:
     if not lines or lines[0].strip() != "# Agent Memory":
         lines.insert(0, "# Agent Memory")
         lines.insert(1, "")
-    existing = {line.strip() for line in lines if line.startswith("## ")}
-    for scope in ("user", "project", "session"):
-        if f"## {scope}" not in existing:
-            if lines and lines[-1].strip():
-                lines.append("")
-            lines.extend([f"## {scope}", ""])
     return "\n".join(lines).rstrip() + "\n"
 
 
@@ -894,13 +856,12 @@ def _parse_long_term_items(text: str) -> list[MemoryItem]:
     进入索引。
     """
     items: list[MemoryItem] = []
-    current_scope: str | None = None
     current: dict[str, str] | None = None
 
     def flush() -> None:
         """在遇到新标题或新记录时，把当前累计字段落成一条 MemoryItem。"""
         nonlocal current
-        if current_scope not in VALID_SCOPES or not current:
+        if not current:
             current = None
             return
         required = {"id", "created_at", "source", "reason", "text"}
@@ -908,7 +869,6 @@ def _parse_long_term_items(text: str) -> list[MemoryItem]:
             items.append(MemoryItem(
                 id=current["id"],
                 tier="long_term",
-                scope=current_scope,
                 created_at=current["created_at"],
                 source=current["source"],
                 reason=current["reason"],
@@ -921,7 +881,6 @@ def _parse_long_term_items(text: str) -> list[MemoryItem]:
         line = raw.rstrip()
         if line.startswith("## "):
             flush()
-            current_scope = line[3:].strip()
             continue
         if line.startswith("- id:"):
             flush()
@@ -1008,7 +967,6 @@ def _row_to_item(row: sqlite3.Row) -> MemoryItem:
     return MemoryItem(
         id=row["id"],
         tier=row["tier"],
-        scope=row["scope"],
         created_at=row["created_at"],
         source=row["source"],
         reason=row["reason"],
@@ -1086,7 +1044,6 @@ def format_search_results(results: Iterable[MemorySearchResult]) -> list[dict]:
         {
             "id": result.item.id,
             "tier": result.item.tier,
-            "scope": result.item.scope,
             "score": result.score,
             "snippet": result.snippet,
             "source": result.item.source,

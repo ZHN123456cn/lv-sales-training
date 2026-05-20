@@ -168,11 +168,6 @@ def memory_read(args: dict, ctx: ToolContext) -> str:
         "type": "object",
         "properties": {
             "query": {"type": "string", "description": "Search query."},
-            "scope": {
-                "type": "string",
-                "enum": ["user", "project", "session"],
-                "description": "Optional memory scope filter.",
-            },
             "tier": {"type": "string", "enum": ["long_term", "daily"]},
             "limit": {"type": "integer", "description": "Maximum result count."},
         },
@@ -187,7 +182,6 @@ def memory_search(args: dict, ctx: ToolContext) -> str:
     results = ctx.memory_store.search(
         query=str(args.get("query", "")),
         tier=args.get("tier"),
-        scope=args.get("scope"),
         max_results=args.get("limit", args.get("max_results")),
     )
     return json.dumps(format_search_results(results), ensure_ascii=False, indent=2)
@@ -199,11 +193,6 @@ def memory_search(args: dict, ctx: ToolContext) -> str:
     schema={
         "type": "object",
         "properties": {
-            "scope": {
-                "type": "string",
-                "enum": ["user", "project", "session"],
-                "description": "Memory scope.",
-            },
             "text": {"type": "string", "description": "The memory text to persist."},
             "source": {
                 "type": "string",
@@ -224,7 +213,6 @@ def memory_write(args: dict, ctx: ToolContext) -> str:
     result = ctx.memory_store.write_with_policy(
         text=str(args.get("text", "")),
         source=str(args.get("source", "")),
-        scope=args.get("scope"),
         reason=args.get("reason"),
     )
     return json.dumps(result.as_dict(), ensure_ascii=False)

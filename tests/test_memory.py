@@ -19,16 +19,15 @@ def test_ensure_file_creates_skeleton(tmp_path):
     text = store.read_text()
 
     assert "# Agent Memory" in text
-    assert "## user" in text
-    assert "## project" in text
-    assert "## session" in text
+    assert "## user" not in text
+    assert "## project" not in text
+    assert "## session" not in text
 
 
-def test_add_text_appends_to_correct_scope(tmp_path):
+def test_add_text_appends_to_long_term_root(tmp_path):
     store = make_store(tmp_path)
 
     result = store.add_text(
-        scope="user",
         text="User prefers Python.",
         source="explicit_user_request",
         reason="User asked the agent to remember this.",
@@ -38,14 +37,13 @@ def test_add_text_appends_to_correct_scope(tmp_path):
     uuid.UUID(result.id)
     text = store.read_text()
     assert "User prefers Python." in text
-    assert text.index("## user") < text.index("User prefers Python.") < text.index("## project")
+    assert "scope:" not in text
 
 
 def test_add_text_blocks_sensitive_pattern(tmp_path):
     store = make_store(tmp_path)
 
     result = store.add_text(
-        scope="project",
         text="api_key is secret",
         source="explicit_user_request",
         reason="test",
@@ -60,7 +58,6 @@ def test_add_text_requires_reason(tmp_path):
     store = make_store(tmp_path)
 
     result = store.add_text(
-        scope="project",
         text="Use pytest.",
         source="explicit_user_request",
         reason="",
@@ -70,21 +67,20 @@ def test_add_text_requires_reason(tmp_path):
     assert result.reason == "missing_reason"
 
 
-def test_search_filters_by_scope(tmp_path):
+def test_search_long_term_without_scope_filter(tmp_path):
     store = make_store(tmp_path)
-    store.add_text("user", "User likes Python.", "explicit_user_request", "explicit")
-    store.add_text("project", "Project uses pytest.", "explicit_user_request", "explicit")
+    store.add_text("User likes Python.", "explicit_user_request", "explicit")
+    store.add_text("Project uses pytest.", "explicit_user_request", "explicit")
 
-    results = store.search("Python", scope="user")
+    results = store.search("Python")
 
     assert len(results) == 1
-    assert results[0].item.scope == "user"
     assert "Python" in results[0].snippet
 
 
 def test_fts5_chinese_search_uses_jieba_tokens(tmp_path):
     store = make_store(tmp_path)
-    store.add_long_term("project", "项目使用中文分词提升关键词检索。", "explicit_user_request", "explicit")
+    store.add_long_term("项目使用中文分词提升关键词检索。", "explicit_user_request", "explicit")
 
     results = store.search("中文分词", tier="long_term")
 
@@ -94,7 +90,7 @@ def test_fts5_chinese_search_uses_jieba_tokens(tmp_path):
 
 def test_fts5_quoted_chinese_query_does_not_break_match_syntax(tmp_path):
     store = make_store(tmp_path)
-    store.add_long_term("project", "用户喜欢科幻小说。", "explicit_user_request", "explicit")
+    store.add_long_term("用户喜欢科幻小说。", "explicit_user_request", "explicit")
 
     results = store.search('"科幻"', tier="long_term")
 
@@ -108,7 +104,6 @@ def test_memory_tools_read_search_write(tmp_path):
 
     raw = execute_tool("memory_write", {
         "tier": "long_term",
-        "scope": "project",
         "text": "Project keeps memory in Markdown.",
         "source": "model_observation",
     }, ctx)
@@ -122,7 +117,7 @@ def test_memory_tools_read_search_write(tmp_path):
 
     search_result = json.loads(execute_tool("memory_search", {"query": "Markdown"}, ctx))
     assert search_result[0]["tier"] == "daily"
-    assert search_result[0]["scope"] is None
+    assert "scope" not in search_result[0]
 
 
 def test_add_daily_and_read_back(tmp_path):
@@ -143,7 +138,6 @@ def test_write_policy_routes_explicit_request_to_long_term(tmp_path):
     result = store.write_with_policy(
         text="User prefers concise answers.",
         source="explicit_user_request",
-        scope="user",
         reason="User explicitly asked the agent to remember this.",
     )
 
@@ -182,7 +176,7 @@ def test_promote_daily_copies_to_long_term(tmp_path):
     item_id = store.add_daily("Prefer deterministic migrations.", "model_observation", day="2026-05-18").id
     store.search("deterministic", tier="daily")
 
-    promoted_id = store.promote_daily(item_id, "project", "Repeatedly useful project convention.")
+    promoted_id = store.promote_daily(item_id, "Repeatedly useful project convention.")
 
     assert promoted_id
     assert "Prefer deterministic migrations." in store.read_long_term_text()
@@ -192,13 +186,12 @@ def test_promote_daily_copies_to_long_term(tmp_path):
 def test_memory_reindex_rebuilds_after_manual_edit(tmp_path):
     store = make_store(tmp_path)
     store.long_term_path.write_text(
-        "# Agent Memory\n\n## user\n\n## project\n\n"
+        "# Agent Memory\n\n"
         "- id: manual-1\n"
         "  created_at: 2026-05-18T00:00:00+00:00\n"
         "  source: explicit_user_request\n"
         "  reason: manual edit\n"
-        "  text: Manual memory survives reindex.\n\n"
-        "## session\n",
+        "  text: Manual memory survives reindex.\n",
         encoding="utf-8",
     )
 
@@ -237,7 +230,7 @@ def test_ollama_embedding_is_persisted_in_vector_store(tmp_path, monkeypatch):
     cfg = MemoryConfig(embedding_provider="ollama")
     store = MarkdownMemoryStore(tmp_path / ".agent_memory" / "MEMORY.md", cfg)
 
-    item_id = store.add_long_term("project", "Use real embeddings.", "explicit_user_request", "remember").id
+    item_id = store.add_long_term("Use real embeddings.", "explicit_user_request", "remember").id
 
     with store._connect() as conn:
         row = conn.execute("SELECT embedding FROM memory_vectors WHERE item_id = ?", (item_id,)).fetchone()
@@ -259,7 +252,7 @@ def test_embedding_model_change_requires_reindex(tmp_path, monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", lambda request, timeout: FakeResponse())
     path = tmp_path / ".agent_memory" / "MEMORY.md"
     first = MarkdownMemoryStore(path, MemoryConfig(embedding_provider="ollama", embedding_model="m1"))
-    first.add_long_term("project", "Use one model.", "explicit_user_request", "remember")
+    first.add_long_term("Use one model.", "explicit_user_request", "remember")
 
     second = MarkdownMemoryStore(path, MemoryConfig(embedding_provider="ollama", embedding_model="m2"))
 
@@ -268,7 +261,7 @@ def test_embedding_model_change_requires_reindex(tmp_path, monkeypatch):
 
 def test_context_includes_memory_block(default_config, empty_session, tool_ctx, skill_registry, tmp_path):
     store = make_store(tmp_path)
-    store.add_text("project", "Memory is injected.", "explicit_user_request", "test")
+    store.add_text("Memory is injected.", "explicit_user_request", "test")
     manager = ContextManager(default_config, skill_registry, store)
 
     messages = manager.build_messages(empty_session, tool_ctx)

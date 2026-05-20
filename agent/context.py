@@ -53,7 +53,7 @@ class ContextManager:
                 "- <memory> is long-term context across sessions.\n"
                 "- Prefer it for stable user preferences, durable facts, and project conventions.\n"
                 "- Write new memories only via memory_write.\n"
-                "- If the user explicitly asks to remember something, use source=explicit_user_request with scope and reason; it is written directly to long-term memory.\n"
+                "- If the user explicitly asks to remember something, use source=explicit_user_request with reason; it is written directly to long-term memory.\n"
                 "- Otherwise use source=model_observation or source=model_inferred_stable_fact; it is written to daily memory first and may be promoted later.\n"
                 "- Do not store secrets, credentials, cookies, API keys, or other sensitive values."
             )
