@@ -103,7 +103,7 @@ class TestDirectAnswer:
         llm = make_mock_llm(blocking_resp("ok"))
         loop = make_loop(default_config, empty_session, llm)
         loop.run("测试")
-        sent_messages = llm.chat_blocking.call_args.kwargs["messages"]
+        sent_messages = llm.chat_blocking.call_args[1]["messages"]
         assert sent_messages[0]["role"] == "system"
         assert all(m["role"] != "system" for m in empty_session.messages)
 
@@ -215,7 +215,7 @@ class TestSkillRead:
 
         loop.run("hello")
 
-        sent_messages = llm.chat_blocking.call_args.kwargs["messages"]
+        sent_messages = llm.chat_blocking.call_args[1]["messages"]
         assert "<available_skills>" in sent_messages[0]["content"]
         assert "<name>research</name>" in sent_messages[0]["content"]
 

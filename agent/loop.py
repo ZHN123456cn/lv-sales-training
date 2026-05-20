@@ -21,6 +21,7 @@ from typing import Any, Callable
 from .config import AgentConfig
 from .context import ContextManager
 from .llm import LLMClient, LLMResponse
+from .memory import MarkdownMemoryStore, build_memory_store
 from .session import Session
 from .skills import SkillRegistry, load_skills
 from .tools import ToolContext, execute_tool, get_openai_schemas
@@ -59,18 +60,31 @@ class AgentLoop:
         session: Session,
         llm: LLMClient,
         skill_registry: SkillRegistry | None = None,
+        memory_store: MarkdownMemoryStore | None = None,
         context_manager: ContextManager | None = None,
     ) -> None:
         self._config = config
         self._session = session
         self._llm = llm
         self._skill_registry = skill_registry or load_skills(config)
-        self._context_manager = context_manager or ContextManager(config, self._skill_registry)
+        self._memory_store = memory_store if memory_store is not None else build_memory_store(config)
+        self._enabled_tools = list(config.enabled_tools)
+        if self._memory_store is None:
+            self._enabled_tools = [
+                name for name in self._enabled_tools
+                if name not in {"memory_read", "memory_search", "memory_write", "memory_reindex"}
+            ]
+        self._context_manager = context_manager or ContextManager(
+            config,
+            self._skill_registry,
+            self._memory_store,
+        )
         # ToolContext 持有当前工作目录，change_dir 工具会修改它
         self._tool_ctx = ToolContext(
             work_dir=config.resolved_work_dir(),
             session_id=session.id,
             skill_registry=self._skill_registry,
+            memory_store=self._memory_store,
         )
 
     @property
@@ -80,6 +94,14 @@ class AgentLoop:
     @property
     def skill_registry(self) -> SkillRegistry:
         return self._skill_registry
+
+    @property
+    def memory_store(self) -> MarkdownMemoryStore | None:
+        return self._memory_store
+
+    @property
+    def enabled_tools(self) -> list[str]:
+        return list(self._enabled_tools)
 
     # ------------------------------------------------------------------
     # 初始化 system prompt
@@ -112,7 +134,7 @@ class AgentLoop:
         """
         self._append_user(user_input)
 
-        tool_schemas = get_openai_schemas(self._config.enabled_tools)
+        tool_schemas = get_openai_schemas(self._enabled_tools)
         max_iter = self._config.max_iterations
 
         for iteration in range(max_iter):
@@ -174,7 +196,7 @@ class AgentLoop:
         """
         self._append_user(user_input)
 
-        tool_schemas = get_openai_schemas(self._config.enabled_tools)
+        tool_schemas = get_openai_schemas(self._enabled_tools)
         max_iter = self._config.max_iterations
 
         for iteration in range(max_iter):

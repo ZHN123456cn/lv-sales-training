@@ -16,7 +16,11 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    def load_dotenv(*args, **kwargs) -> bool:
+        return False
 
 # project_class/ 目录（本文件的上一级）
 PROJECT_ROOT = Path(__file__).parent.parent.resolve()
@@ -55,10 +59,42 @@ class SkillsConfig:
 
 
 @dataclass
+class MemoryConfig:
+    enabled: bool = True
+    backend: str = "markdown"
+    root_dir: str = ".agent_memory"
+    long_term_file: str = "MEMORY.md"
+    daily_dir: str = "daily"
+    context_max_inject_chars: int = 16_384
+    context_inject_when_empty: bool = True
+    search_keyword_enabled: bool = True
+    search_vector_enabled: bool = True
+    search_hybrid_enabled: bool = True
+    search_max_results: int = 5
+    search_max_snippet_chars: int = 500
+    embedding_provider: str = "none"
+    embedding_base_url: str = "http://localhost:11434"
+    embedding_model: str = "embeddinggemma"
+    embedding_timeout: int = 30
+    promotion_enabled: bool = True
+    promotion_min_recall_count: int = 3
+    write_max_text_chars: int = 2_048
+    admission_explicit_user_intent: bool = True
+    admission_model_inferred_stable_fact: bool = True
+    sensitive_patterns: list[str] = field(default_factory=lambda: [
+        r"(?i)api[_-]?key",
+        r"\b[0-9]{11}\b",
+        r"(?i)password",
+        r"(?i)cookie",
+    ])
+
+
+@dataclass
 class AgentConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
     max_iterations: int = 20
     work_dir: str = "."
     system_prompt: str = (
@@ -68,6 +104,10 @@ class AgentConfig:
     )
     enabled_tools: list[str] = field(default_factory=lambda: [
         "skill_read",
+        "memory_read",
+        "memory_search",
+        "memory_write",
+        "memory_reindex",
         "read_file",
         "write_file",
         "list_dir",
@@ -101,6 +141,18 @@ class AgentConfig:
             p = Path(raw)
             result.append(p if p.is_absolute() else (self.project_root / p).resolve())
         return result
+
+    def resolved_memory_dir(self) -> Path:
+        p = Path(self.memory.root_dir)
+        if p.is_absolute():
+            return p
+        return (self.project_root / p).resolve()
+
+    def resolved_memory_file(self) -> Path:
+        memory_file = Path(self.memory.long_term_file)
+        if memory_file.name != self.memory.long_term_file or self.memory.long_term_file in ("", ".", ".."):
+            raise ValueError("memory.long_term_file must be a plain filename")
+        return self.resolved_memory_dir() / self.memory.long_term_file
 
     def formatted_system_prompt(self) -> str:
         return self.system_prompt.format(work_dir=str(self.resolved_work_dir()))
@@ -136,11 +188,14 @@ def _apply_env_overrides(cfg: AgentConfig) -> None:
         "AGENT_BASE_URL":  (cfg.llm, "base_url"),
         "AGENT_MODEL":     (cfg.llm, "model"),
         "AGENT_WORK_DIR":  (cfg, "work_dir"),
+        "AGENT_MEMORY_DIR": (cfg.memory, "root_dir"),
     }
     for env_key, (obj, attr) in overrides.items():
         val = os.environ.get(env_key)
         if val is not None:
             setattr(obj, attr, val)
+    if os.environ.get("AGENT_MEMORY_DISABLED") == "1":
+        cfg.memory.enabled = False
 
 
 def load_config(config_path: Path | None = None) -> AgentConfig:
@@ -182,6 +237,56 @@ def load_config(config_path: Path | None = None) -> AgentConfig:
         elif hasattr(cfg.skills, key):
             setattr(cfg.skills, key, val)
 
+    memory_data: dict = yaml_data.get("memory", {})
+    for key, val in memory_data.items():
+        if key == "context" and isinstance(val, dict):
+            if "max_inject_chars" in val:
+                cfg.memory.context_max_inject_chars = int(val["max_inject_chars"])
+            if "inject_when_empty" in val:
+                cfg.memory.context_inject_when_empty = bool(val["inject_when_empty"])
+        elif key == "search" and isinstance(val, dict):
+            if "keyword_enabled" in val:
+                cfg.memory.search_keyword_enabled = bool(val["keyword_enabled"])
+            if "vector_enabled" in val:
+                cfg.memory.search_vector_enabled = bool(val["vector_enabled"])
+            if "hybrid_enabled" in val:
+                cfg.memory.search_hybrid_enabled = bool(val["hybrid_enabled"])
+            if "max_results" in val:
+                cfg.memory.search_max_results = int(val["max_results"])
+            if "max_snippet_chars" in val:
+                cfg.memory.search_max_snippet_chars = int(val["max_snippet_chars"])
+            embedding = val.get("embedding")
+            if isinstance(embedding, dict):
+                if "provider" in embedding:
+                    cfg.memory.embedding_provider = str(embedding["provider"])
+                if "base_url" in embedding:
+                    cfg.memory.embedding_base_url = str(embedding["base_url"])
+                if "model" in embedding:
+                    cfg.memory.embedding_model = str(embedding["model"])
+                if "timeout" in embedding:
+                    cfg.memory.embedding_timeout = int(embedding["timeout"])
+        elif key == "promotion" and isinstance(val, dict):
+            if "enabled" in val:
+                cfg.memory.promotion_enabled = bool(val["enabled"])
+            if "min_recall_count" in val:
+                cfg.memory.promotion_min_recall_count = int(val["min_recall_count"])
+        elif key == "memory_file":
+            # Backward compatibility for earlier configs.
+            cfg.memory.long_term_file = str(val)
+        elif key == "write" and isinstance(val, dict):
+            if "max_text_chars" in val:
+                cfg.memory.write_max_text_chars = int(val["max_text_chars"])
+            admission = val.get("admission")
+            if isinstance(admission, dict):
+                if "explicit_user_intent" in admission:
+                    cfg.memory.admission_explicit_user_intent = bool(admission["explicit_user_intent"])
+                if "model_inferred_stable_fact" in admission:
+                    cfg.memory.admission_model_inferred_stable_fact = bool(admission["model_inferred_stable_fact"])
+            if "sensitive_patterns" in val and isinstance(val["sensitive_patterns"], list):
+                cfg.memory.sensitive_patterns = [str(v) for v in val["sensitive_patterns"]]
+        elif hasattr(cfg.memory, key):
+            setattr(cfg.memory, key, val)
+
     agent_data: dict = yaml_data.get("agent", {})
     for key, val in agent_data.items():
         if key == "work_dir":
@@ -197,5 +302,6 @@ def load_config(config_path: Path | None = None) -> AgentConfig:
 
     # 4. 环境变量覆盖
     _apply_env_overrides(cfg)
+    cfg.resolved_memory_file()
 
     return cfg

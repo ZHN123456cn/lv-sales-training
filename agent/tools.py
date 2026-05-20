@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
+    from .memory import MarkdownMemoryStore
     from .skills import SkillRegistry
 
 
@@ -30,6 +31,7 @@ class ToolContext:
     work_dir: Path          # 当前工作目录（可被 change_dir 修改）
     session_id: str = ""
     skill_registry: "SkillRegistry | None" = None
+    memory_store: "MarkdownMemoryStore | None" = None
     _extra: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def resolve(self, path: str) -> Path:
@@ -136,6 +138,108 @@ def skill_read(args: dict, ctx: ToolContext) -> str:
 
     from .skills import read_skill_markdown
     return read_skill_markdown(name, registry)
+
+
+@tool(
+    name="memory_read",
+    description="Read long-term memory or one daily memory file.",
+    schema={
+        "type": "object",
+        "properties": {
+            "tier": {"type": "string", "enum": ["long_term", "daily"]},
+            "date": {"type": "string", "description": "YYYY-MM-DD, only for daily memory."},
+        },
+        "required": [],
+    },
+)
+def memory_read(args: dict, ctx: ToolContext) -> str:
+    if ctx.memory_store is None:
+        return "[错误] Memory 系统未启用"
+    tier = str(args.get("tier", "long_term"))
+    if tier == "daily":
+        return ctx.memory_store.read_daily_text(args.get("date"))
+    return ctx.memory_store.read_long_term_text()
+
+
+@tool(
+    name="memory_search",
+    description="Search long-term and daily memory.",
+    schema={
+        "type": "object",
+        "properties": {
+            "query": {"type": "string", "description": "Search query."},
+            "scope": {
+                "type": "string",
+                "enum": ["user", "project", "session"],
+                "description": "Optional memory scope filter.",
+            },
+            "tier": {"type": "string", "enum": ["long_term", "daily"]},
+            "limit": {"type": "integer", "description": "Maximum result count."},
+        },
+        "required": ["query"],
+    },
+)
+def memory_search(args: dict, ctx: ToolContext) -> str:
+    if ctx.memory_store is None:
+        return "[错误] Memory 系统未启用"
+    from .memory import format_search_results
+
+    results = ctx.memory_store.search(
+        query=str(args.get("query", "")),
+        tier=args.get("tier"),
+        scope=args.get("scope"),
+        max_results=args.get("limit", args.get("max_results")),
+    )
+    return json.dumps(format_search_results(results), ensure_ascii=False, indent=2)
+
+
+@tool(
+    name="memory_write",
+    description="Write memory using policy: explicit user remember requests go to long-term memory; all other observations go to daily memory.",
+    schema={
+        "type": "object",
+        "properties": {
+            "scope": {
+                "type": "string",
+                "enum": ["user", "project", "session"],
+                "description": "Memory scope.",
+            },
+            "text": {"type": "string", "description": "The memory text to persist."},
+            "source": {
+                "type": "string",
+                "enum": ["explicit_user_request", "model_inferred_stable_fact", "model_observation"],
+                "description": "Use explicit_user_request only when the user explicitly asks to remember something; otherwise use model_observation or model_inferred_stable_fact.",
+            },
+            "reason": {
+                "type": "string",
+                "description": "Audit reason explaining why this should be remembered.",
+            },
+        },
+        "required": ["text", "source"],
+    },
+)
+def memory_write(args: dict, ctx: ToolContext) -> str:
+    if ctx.memory_store is None:
+        return "[错误] Memory 系统未启用"
+    result = ctx.memory_store.write_with_policy(
+        text=str(args.get("text", "")),
+        source=str(args.get("source", "")),
+        scope=args.get("scope"),
+        reason=args.get("reason"),
+    )
+    return json.dumps(result.as_dict(), ensure_ascii=False)
+
+
+@tool(
+    name="memory_reindex",
+    description="Rebuild the derived SQLite memory index from Markdown source files.",
+    schema={"type": "object", "properties": {}, "required": []},
+)
+def memory_reindex(args: dict, ctx: ToolContext) -> str:
+    if ctx.memory_store is None:
+        return "[错误] Memory 系统未启用"
+    ctx.memory_store.rebuild_index()
+    return json.dumps({"ok": True, **ctx.memory_store.index_status()}, ensure_ascii=False)
 
 
 @tool(

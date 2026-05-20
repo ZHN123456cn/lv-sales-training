@@ -13,13 +13,18 @@ import json
 from collections.abc import Generator
 from typing import Any
 
-from openai import OpenAI
-
 from .config import LLMConfig
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None  # type: ignore[assignment]
 
 
 class LLMClient:
     def __init__(self, config: LLMConfig) -> None:
+        if OpenAI is None:
+            raise RuntimeError("openai package is required to use LLMClient")
         self._config = config
         self._client = OpenAI(
             api_key=config.api_key,

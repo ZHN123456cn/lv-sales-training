@@ -288,7 +288,7 @@ class TestLLMClientProviderPreparation:
                 {"role": "assistant", "content": "x", "reasoning_content": "secret"}
             ])
 
-        sent_messages = create.call_args.kwargs["messages"]
+        sent_messages = create.call_args[1]["messages"]
         assert sent_messages == [{"role": "assistant", "content": "x"}]
 
     def test_chat_preserves_reasoning_for_deepseek_provider(self):
@@ -305,7 +305,7 @@ class TestLLMClientProviderPreparation:
                 {"role": "assistant", "content": "x", "reasoning_content": "state"}
             ])
 
-        sent_messages = create.call_args.kwargs["messages"]
+        sent_messages = create.call_args[1]["messages"]
         assert sent_messages == [
             {"role": "assistant", "content": "x", "reasoning_content": "state"}
         ]

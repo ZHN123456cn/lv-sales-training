@@ -78,7 +78,8 @@ def _setup_readline(history_path: Path) -> None:
             "/help", "/exit", "/quit",
             "/session new", "/session list", "/session load ",
             "/session info", "/session delete ",
-            "/history", "/clear", "/tools", "/config",
+            "/history", "/clear", "/tools", "/config", 
+            "/skills", "/skill ", "/memory",
         ]
         def completer(text: str, state: int) -> str | None:
             options = [c for c in SLASH_COMMANDS if c.startswith(text)]
@@ -113,6 +114,13 @@ HELP_TEXT = """
   /tools               列出所有可用工具
   /skills              列出所有可用 Skill
   /skill <name>        显示指定 Skill 的 SKILL.md 路径和摘要
+  /memory show         显示当前长期记忆文件内容（/memory 等价于 show）
+  /memory daily [date] 显示每日记忆；不传 date 时读取今天
+  /memory search <q>   搜索长期记忆与每日记忆
+  /memory status       显示 FTS5 / sqlite-vec / embedding 状态
+  /memory reindex      从 Markdown 真源强制重建 FTS5 与向量索引
+  /memory promote <id> <scope>
+                       将指定每日记忆晋升到长期记忆
   /config              显示当前配置
   /cd <path>           切换工作目录
 
@@ -211,6 +219,9 @@ class CLI:
 
         elif verb == "/config":
             self._print_config()
+
+        elif verb == "/memory":
+            self._handle_memory_cmd(parts[1:] if len(parts) > 1 else [])
 
         elif verb == "/cd":
             if len(parts) < 2:
@@ -379,7 +390,7 @@ class CLI:
         self._sys_print("已清空当前对话历史（Session 文件未删除）。")
 
     def _print_tools(self) -> None:
-        enabled = self._config.enabled_tools
+        enabled = self._loop.enabled_tools
         print(_blue("可用工具："))
         for name, td in TOOL_REGISTRY.items():
             status = _green("启用") if name in enabled else _gray("禁用")
@@ -418,7 +429,58 @@ class CLI:
         print(f"  最大迭代：  {cfg.max_iterations}")
         print(f"  工作目录：  {cfg.resolved_work_dir()}")
         print(f"  Session 目录：{cfg.resolved_session_dir()}")
+        print(f"  Memory 启用： {cfg.memory.enabled}")
+        print(f"  Memory 文件： {cfg.resolved_memory_file()}")
+        if self._loop.memory_store is not None:
+            status = self._loop.memory_store.index_status()
+            print(f"  Memory FTS5： {status['fts5_enabled']}")
+            print(f"  Memory sqlite-vec： {status['sqlite_vec_enabled']}")
         print(f"  配置文件：  {cfg.config_path}")
+
+    def _handle_memory_cmd(self, args: list[str]) -> None:
+        store = self._loop.memory_store
+        if store is None:
+            self._err_print("Memory 系统未启用")
+            return
+        sub = args[0].lower() if args else "show"
+        if sub == "show":
+            self._print_memory()
+        elif sub == "daily":
+            day = args[1] if len(args) > 1 else None
+            print(_blue(f"Daily memory：{day or 'today'}"))
+            print(store.read_daily_text(day))
+        elif sub == "search":
+            if len(args) < 2:
+                self._err_print("用法：/memory search <query>")
+                return
+            from .memory import format_search_results
+            import json as _json
+            print(_json.dumps(format_search_results(store.search(" ".join(args[1:]))), ensure_ascii=False, indent=2))
+        elif sub == "reindex":
+            store.rebuild_index()
+            self._sys_print("Memory 索引已重建")
+        elif sub == "status":
+            import json as _json
+            print(_json.dumps(store.index_status(), ensure_ascii=False, indent=2))
+        elif sub == "promote":
+            if len(args) < 3:
+                self._err_print("用法：/memory promote <daily-item-id> <scope>")
+                return
+            try:
+                promoted_id = store.promote_daily(args[1], args[2], "CLI manual promotion")
+                self._sys_print(f"已晋升为长期记忆：{promoted_id}")
+            except Exception as e:
+                self._err_print(f"晋升失败：{e}")
+        else:
+            self._err_print("用法：/memory show | daily [YYYY-MM-DD] | search <query> | status | reindex | promote <id> <scope>")
+
+    def _print_memory(self) -> None:
+        store = self._loop.memory_store
+        if store is None:
+            self._err_print("Memory 系统未启用")
+            return
+        print(_blue(f"Memory：{store.path}"))
+        print(store.read_long_term_text())
 
     def _change_dir(self, path: str) -> None:
         from .tools import execute_tool

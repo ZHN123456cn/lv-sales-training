@@ -1,5 +1,8 @@
 .env
 .sessions/
+.agent_memory/
+.claude/
+.debug_memory_tmp/
 skills/
 __pycache__/
 .pytest_cache/

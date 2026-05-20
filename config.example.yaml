@@ -28,6 +28,10 @@ session:
 tools:
   enabled:                                # 启用的工具，注释掉即可禁用
     - skill_read
+    - memory_read
+    - memory_search
+    - memory_write
+    - memory_reindex
     - read_file
     - write_file
     - list_dir
@@ -42,3 +46,37 @@ skills:
   max_file_bytes: 262144                  # 单个 SKILL.md 最大读取字节数
   max_prompt_items: 50                    # 注入上下文的 Skill 摘要数量上限
   max_description_chars: 240              # 单个 description 最大长度
+
+memory:
+  enabled: true
+  backend: markdown
+  root_dir: ".agent_memory"
+  long_term_file: "MEMORY.md"
+  daily_dir: "daily"
+  context:
+    max_inject_chars: 16384
+    inject_when_empty: true
+  search:
+    keyword_enabled: true
+    vector_enabled: true
+    hybrid_enabled: true
+    max_results: 5
+    max_snippet_chars: 500
+    embedding:
+      provider: ollama
+      base_url: "http://localhost:11434"
+      model: "embeddinggemma"
+      timeout: 30
+  promotion:
+    enabled: true
+    min_recall_count: 3
+  write:
+    max_text_chars: 2048
+    admission:
+      explicit_user_intent: true
+      model_inferred_stable_fact: true
+    sensitive_patterns:
+      - "(?i)api[_-]?key"
+      - "\\b[0-9]{11}\\b"
+      - "(?i)password"
+      - "(?i)cookie"

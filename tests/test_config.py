@@ -72,7 +72,8 @@ class TestDefaultValues:
         monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
         cfg = load_config(tmp_path / "nonexistent.yaml")
         assert set(cfg.enabled_tools) == {
-            "skill_read", "read_file", "write_file", "list_dir",
+            "skill_read", "memory_read", "memory_search", "memory_write", "memory_reindex",
+            "read_file", "write_file", "list_dir",
             "change_dir", "shell", "search_files",
         }
 
@@ -83,6 +84,14 @@ class TestDefaultValues:
         assert cfg.skills.enabled is True
         assert cfg.skills.dirs == ["skills"]
         assert cfg.resolved_skill_dirs() == [(tmp_path / "skills").resolve()]
+
+    def test_default_memory_config(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
+        cfg = load_config(tmp_path / "nonexistent.yaml")
+        assert cfg.memory.enabled is True
+        assert cfg.memory.root_dir == ".agent_memory"
+        assert cfg.memory.daily_dir == "daily"
+        assert cfg.resolved_memory_file() == (tmp_path / ".agent_memory" / "MEMORY.md").resolve()
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +160,50 @@ class TestLoadFromYaml:
         assert cfg.skills.dirs == ["custom-skills"]
         assert cfg.skills.max_prompt_items == 3
 
+    def test_yaml_overrides_memory_config(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
+        cfg_path = write_yaml(tmp_path / "config.yaml", {
+            "memory": {
+                "enabled": False,
+                "root_dir": "mem",
+                "long_term_file": "LONG.md",
+                "daily_dir": "daily_notes",
+                "context": {"max_inject_chars": 123},
+                "search": {"max_results": 2, "vector_enabled": False},
+                "promotion": {"min_recall_count": 2},
+                "write": {"max_text_chars": 456},
+            }
+        })
+        cfg = load_config(cfg_path)
+        assert cfg.memory.enabled is False
+        assert cfg.memory.root_dir == "mem"
+        assert cfg.memory.long_term_file == "LONG.md"
+        assert cfg.memory.daily_dir == "daily_notes"
+        assert cfg.memory.context_max_inject_chars == 123
+        assert cfg.memory.search_max_results == 2
+        assert cfg.memory.search_vector_enabled is False
+        assert cfg.memory.promotion_min_recall_count == 2
+        assert cfg.memory.write_max_text_chars == 456
+
+    def test_yaml_loads_embedding_config(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
+        cfg_path = write_yaml(tmp_path / "config.yaml", {
+            "memory": {
+                "search": {
+                    "embedding": {
+                        "provider": "ollama",
+                        "base_url": "http://localhost:11434",
+                        "model": "embeddinggemma",
+                        "timeout": 12,
+                    }
+                }
+            }
+        })
+        cfg = load_config(cfg_path)
+        assert cfg.memory.embedding_provider == "ollama"
+        assert cfg.memory.embedding_model == "embeddinggemma"
+        assert cfg.memory.embedding_timeout == 12
+
     def test_partial_yaml_uses_defaults_for_rest(self, tmp_path, monkeypatch):
         """yaml 只写部分字段，其余字段仍使用默认值。"""
         monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
@@ -204,6 +257,18 @@ class TestEnvVarOverrides:
         cfg = load_config(tmp_path / "nonexistent.yaml")
         assert cfg.llm.api_key == "standalone-key"
 
+    def test_env_disables_memory(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setenv("AGENT_MEMORY_DISABLED", "1")
+        cfg = load_config(tmp_path / "nonexistent.yaml")
+        assert cfg.memory.enabled is False
+
+    def test_env_overrides_memory_dir(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
+        monkeypatch.setenv("AGENT_MEMORY_DIR", "env-memory")
+        cfg = load_config(tmp_path / "nonexistent.yaml")
+        assert cfg.memory.root_dir == "env-memory"
+
 
 # ---------------------------------------------------------------------------
 # 测试：路径解析
@@ -235,6 +300,14 @@ class TestPathResolution:
         cfg = load_config(cfg_path)
         cfg.project_root = tmp_path
         assert cfg.resolved_session_dir() == (tmp_path / "my_sess").resolve()
+
+    def test_memory_file_must_be_filename(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
+        cfg_path = write_yaml(tmp_path / "config.yaml", {
+            "memory": {"long_term_file": "../MEMORY.md"}
+        })
+        with pytest.raises(ValueError):
+            load_config(cfg_path)
 
 
 # ---------------------------------------------------------------------------
