@@ -700,10 +700,10 @@ class MarkdownMemoryStore:
         sqlite-vec 要求在表定义中写死向量维度。embedding 模型变化可能导致已有向量
         维度不兼容；这种情况下会禁用向量搜索，直到执行完整 reindex。
         """
-        if not self._load_sqlite_vec(conn):
-            self._vec_available = False
-            return
         if self._vector_dimensions is None:
+            if not self._load_sqlite_vec(conn):
+                self._vec_available = False
+                return
             conn.execute(
                 f"""
                 CREATE VIRTUAL TABLE IF NOT EXISTS memory_vec

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import uuid
 
 from agent.context import ContextManager
@@ -236,6 +237,56 @@ def test_ollama_embedding_is_persisted_in_vector_store(tmp_path, monkeypatch):
         row = conn.execute("SELECT embedding FROM memory_vectors WHERE item_id = ?", (item_id,)).fetchone()
     assert row is not None
     assert json.loads(row["embedding"]) == [0.1, 0.2, 0.3]
+
+
+def test_rebuild_index_populates_sqlite_vec_for_every_embedding(tmp_path, monkeypatch):
+    try:
+        import sqlite_vec  # type: ignore  # noqa: F401
+    except Exception:
+        import pytest
+        pytest.skip("sqlite-vec is not installed")
+
+    vectors = {
+        "User prefers Chinese replies.": [0.1, 0.0, 0.0],
+        "User likes science fiction movies.": [0.0, 0.1, 0.0],
+        "Use py10 for tests.": [0.0, 0.0, 0.1],
+        "science fiction": [0.0, 0.1, 0.0],
+    }
+
+    class FakeResponse:
+        def __init__(self, vector):
+            self._vector = vector
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps({"embeddings": [self._vector]}).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        payload = json.loads(request.data.decode("utf-8"))
+        return FakeResponse(vectors[payload["input"]])
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    cfg = MemoryConfig(embedding_provider="ollama")
+    store = MarkdownMemoryStore(tmp_path / ".agent_memory" / "MEMORY.md", cfg)
+    for text in list(vectors)[:3]:
+        store.add_long_term(text, "explicit_user_request", "remember")
+
+    store.rebuild_index()
+
+    with store._connect() as conn:
+        try:
+            entry_count = conn.execute("SELECT COUNT(*) AS c FROM memory_entries").fetchone()["c"]
+            vec_count = conn.execute("SELECT COUNT(*) AS c FROM memory_vec").fetchone()["c"]
+        except sqlite3.OperationalError as e:
+            import pytest
+            pytest.skip(f"sqlite-vec table is unavailable: {e}")
+    assert vec_count == entry_count
+    assert any(result.matched_by == "hybrid" for result in store.search("science fiction"))
 
 
 def test_embedding_model_change_requires_reindex(tmp_path, monkeypatch):
