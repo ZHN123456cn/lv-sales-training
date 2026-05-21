@@ -1,4 +1,8 @@
 .env
+config.yaml
+check_index.py
+_diagnose_vec.py
+codeview.md
 .sessions/
 .agent_memory/
 .claude/

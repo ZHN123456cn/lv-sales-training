@@ -37,7 +37,6 @@ VALID_SOURCES = {
 }
 LONG_TERM_SOURCES = {
     "explicit_user_request",
-    "model_inferred_stable_fact",
     "promoted_daily_memory",
 }
 SKELETON = "# Agent Memory\n"
