@@ -80,3 +80,20 @@ memory:
       - "\\b[0-9]{11}\\b"
       - "(?i)password"
       - "(?i)cookie"
+
+mcp:
+  enabled: true
+  servers:
+    filesystem:
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      cwd: "."
+      env: {}
+      timeout: 30
+    hello-world:
+      command: "C:/Users/hh/.openclaw/workspace/mcptest/.venv/Scripts/python.exe"
+      args:
+        - "C:/Users/hh/.openclaw/workspace/mcptest/servermcp/server.py"
+      cwd: "C:/Users/hh/.openclaw/workspace/mcptest"
+      env: {}
+      timeout: 30

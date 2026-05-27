@@ -79,7 +79,7 @@ def _setup_readline(history_path: Path) -> None:
             "/session new", "/session list", "/session load ",
             "/session info", "/session delete ",
             "/history", "/clear", "/tools", "/config", 
-            "/skills", "/skill ", "/memory",
+            "/skills", "/skill ", "/memory", "/mcp list",
         ]
         def completer(text: str, state: int) -> str | None:
             options = [c for c in SLASH_COMMANDS if c.startswith(text)]
@@ -148,6 +148,8 @@ class CLI:
         """Session 切换后重建 loop。"""
         from .llm import LLMClient
         from .skills import load_skills
+        if self._loop is not None:
+            self._loop.close()
         if self._skill_registry is None:
             self._skill_registry = load_skills(self._config)
         llm = LLMClient(self._config.llm)
@@ -180,6 +182,9 @@ class CLI:
                 self._handle_slash(user_input)
             else:
                 self._handle_message(user_input)
+
+        if self._loop is not None:
+            self._loop.close()
 
     # ------------------------------------------------------------------
     # 斜杠命令处理
@@ -222,6 +227,9 @@ class CLI:
 
         elif verb == "/memory":
             self._handle_memory_cmd(parts[1:] if len(parts) > 1 else [])
+
+        elif verb == "/mcp":
+            self._handle_mcp_cmd(parts[1:] if len(parts) > 1 else [])
 
         elif verb == "/cd":
             if len(parts) < 2:
@@ -396,6 +404,11 @@ class CLI:
             status = _green("启用") if name in enabled else _gray("禁用")
             print(f"  [{status}] {_bold(name)} — {td.description}")
 
+        if self._loop.mcp_tools:
+            print(_blue("MCP tools:"))
+            for td in self._loop.mcp_tools:
+                print(f"  [{_green('enabled')}] {_bold(td.name)} - {td.description}")
+
     def _print_skills(self) -> None:
         skills = self._loop.skill_registry.list_for_prompt()
         if not skills:
@@ -473,6 +486,44 @@ class CLI:
                 self._err_print(f"晋升失败：{e}")
         else:
             self._err_print("用法：/memory show | daily [YYYY-MM-DD] | search <query> | status | reindex | promote <id>")
+
+    def _handle_mcp_cmd(self, args: list[str]) -> None:
+        sub = args[0].lower() if args else "list"
+        if sub != "list":
+            self._err_print("Usage: /mcp list")
+            return
+        self._print_mcp_servers()
+
+    def _print_mcp_servers(self) -> None:
+        servers = self._config.mcp.servers
+        print(_blue("MCP servers:"))
+        if not servers:
+            self._sys_print("No MCP servers configured.")
+            return
+
+        tools_by_server = self._loop.mcp_server_tools
+        errors_by_server = self._loop.mcp_server_errors
+        for name, server in servers.items():
+            state = "enabled" if self._config.mcp.enabled else "disabled"
+            print(f"  {_bold(name)} [{state}]")
+            print(f"    command: {server.command}")
+            if server.args:
+                print(f"    args: {' '.join(server.args)}")
+            if server.cwd:
+                print(f"    cwd: {server.cwd}")
+
+            tools = tools_by_server.get(name, [])
+            if not self._config.mcp.enabled:
+                print("    tools: (MCP disabled)")
+            elif name in errors_by_server:
+                print(f"    error: {errors_by_server[name]}")
+                print("    tools: (none discovered)")
+            elif not tools:
+                print("    tools: (none discovered)")
+            else:
+                print("    tools:")
+                for tool in tools:
+                    print(f"      - {tool.local_name} -> {tool.remote_name}: {tool.description}")
 
     def _print_memory(self) -> None:
         store = self._loop.memory_store

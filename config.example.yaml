@@ -80,3 +80,13 @@ memory:
       - "\\b[0-9]{11}\\b"
       - "(?i)password"
       - "(?i)cookie"
+
+mcp:
+  enabled: false
+  servers:
+    filesystem:
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      cwd: "."
+      env: {}
+      timeout: 30

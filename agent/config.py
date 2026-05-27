@@ -90,11 +90,27 @@ class MemoryConfig:
 
 
 @dataclass
+class MCPServerConfig:
+    command: str = ""
+    args: list[str] = field(default_factory=list)
+    env: dict[str, str] = field(default_factory=dict)
+    cwd: str | None = None
+    timeout: int = 30
+
+
+@dataclass
+class MCPConfig:
+    enabled: bool = False
+    servers: dict[str, MCPServerConfig] = field(default_factory=dict)
+
+
+@dataclass
 class AgentConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
+    mcp: MCPConfig = field(default_factory=MCPConfig)
     max_iterations: int = 20
     work_dir: str = "."
     system_prompt: str = (
@@ -153,6 +169,14 @@ class AgentConfig:
         if memory_file.name != self.memory.long_term_file or self.memory.long_term_file in ("", ".", ".."):
             raise ValueError("memory.long_term_file must be a plain filename")
         return self.resolved_memory_dir() / self.memory.long_term_file
+
+    def resolved_mcp_cwd(self, server: MCPServerConfig) -> Path | None:
+        if server.cwd is None:
+            return None
+        p = Path(server.cwd)
+        if p.is_absolute():
+            return p
+        return (self.project_root / p).resolve()
 
     def formatted_system_prompt(self) -> str:
         return self.system_prompt.format(work_dir=str(self.resolved_work_dir()))
@@ -286,6 +310,24 @@ def load_config(config_path: Path | None = None) -> AgentConfig:
                 cfg.memory.sensitive_patterns = [str(v) for v in val["sensitive_patterns"]]
         elif hasattr(cfg.memory, key):
             setattr(cfg.memory, key, val)
+
+    mcp_data: dict = yaml_data.get("mcp", {})
+    if isinstance(mcp_data, dict):
+        if "enabled" in mcp_data:
+            cfg.mcp.enabled = bool(mcp_data["enabled"])
+        servers_data = mcp_data.get("servers", {})
+        if isinstance(servers_data, dict):
+            for name, raw_server in servers_data.items():
+                if not isinstance(raw_server, dict):
+                    continue
+                server = MCPServerConfig(
+                    command=str(raw_server.get("command", "")),
+                    args=[str(v) for v in raw_server.get("args", [])],
+                    env={str(k): str(v) for k, v in raw_server.get("env", {}).items()},
+                    cwd=str(raw_server["cwd"]) if raw_server.get("cwd") is not None else None,
+                    timeout=int(raw_server.get("timeout", 30)),
+                )
+                cfg.mcp.servers[str(name)] = server
 
     agent_data: dict = yaml_data.get("agent", {})
     for key, val in agent_data.items():

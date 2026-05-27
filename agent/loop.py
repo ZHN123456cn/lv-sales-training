@@ -21,10 +21,11 @@ from typing import Any, Callable
 from .config import AgentConfig
 from .context import ContextManager
 from .llm import LLMClient, LLMResponse
+from .mcp import MCPManager
 from .memory import MarkdownMemoryStore, build_memory_store
 from .session import Session
 from .skills import SkillRegistry, load_skills
-from .tools import ToolContext, execute_tool, get_openai_schemas
+from .tools import TOOL_REGISTRY, ToolContext, ToolDef, execute_tool, get_enabled_tools, get_openai_schemas_from_defs
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +75,14 @@ class AgentLoop:
                 name for name in self._enabled_tools
                 if name not in {"memory_read", "memory_search", "memory_write", "memory_reindex"}
             ]
+        self._mcp_manager: MCPManager | None = None
+        self._local_tools = get_enabled_tools(self._enabled_tools)
+        self._mcp_tools: list[ToolDef] = []
+        if config.mcp.enabled:
+            self._mcp_manager = MCPManager(config)
+            self._mcp_manager.start()
+            self._mcp_tools = self._mcp_manager.list_tool_defs()
+        self._runtime_tools = self._local_tools + self._mcp_tools
         self._context_manager = context_manager or ContextManager(
             config,
             self._skill_registry,
@@ -102,6 +111,34 @@ class AgentLoop:
     @property
     def enabled_tools(self) -> list[str]:
         return list(self._enabled_tools)
+
+    @property
+    def runtime_tools(self) -> list[ToolDef]:
+        return list(self._runtime_tools)
+
+    @property
+    def mcp_tools(self) -> list[ToolDef]:
+        return list(self._mcp_tools)
+
+    @property
+    def mcp_server_tools(self) -> dict[str, list[Any]]:
+        if self._mcp_manager is None:
+            return {}
+        grouped: dict[str, list[Any]] = {}
+        for tool in self._mcp_manager.tools:
+            grouped.setdefault(tool.server_name, []).append(tool)
+        return grouped
+
+    @property
+    def mcp_server_errors(self) -> dict[str, str]:
+        if self._mcp_manager is None:
+            return {}
+        return self._mcp_manager.errors
+
+    def close(self) -> None:
+        if self._mcp_manager is not None:
+            self._mcp_manager.stop()
+            self._mcp_manager = None
 
     # ------------------------------------------------------------------
     # 初始化 system prompt
@@ -134,7 +171,7 @@ class AgentLoop:
         """
         self._append_user(user_input)
 
-        tool_schemas = get_openai_schemas(self._enabled_tools)
+        tool_schemas = get_openai_schemas_from_defs(self._runtime_tools)
         max_iter = self._config.max_iterations
 
         for iteration in range(max_iter):
@@ -161,7 +198,7 @@ class AgentLoop:
                         call_id=tc["id"],
                     ))
 
-                result = execute_tool(tc["name"], tc["arguments"], self._tool_ctx)
+                result = self._execute_runtime_tool(tc["name"], tc["arguments"])
 
                 if on_tool_result:
                     on_tool_result(ToolResultEvent(
@@ -196,7 +233,7 @@ class AgentLoop:
         """
         self._append_user(user_input)
 
-        tool_schemas = get_openai_schemas(self._enabled_tools)
+        tool_schemas = get_openai_schemas_from_defs(self._runtime_tools)
         max_iter = self._config.max_iterations
 
         for iteration in range(max_iter):
@@ -240,7 +277,7 @@ class AgentLoop:
                         call_id=tc["id"],
                     ))
 
-                result = execute_tool(tc["name"], tc["arguments"], self._tool_ctx)
+                result = self._execute_runtime_tool(tc["name"], tc["arguments"])
 
                 if on_tool_result:
                     on_tool_result(ToolResultEvent(
@@ -265,3 +302,10 @@ class AgentLoop:
 
     def _append_user(self, text: str) -> None:
         self._session.messages.append({"role": "user", "content": text})
+
+    def _execute_runtime_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        if name in TOOL_REGISTRY:
+            return execute_tool(name, arguments, self._tool_ctx)
+        if self._mcp_manager is not None:
+            return self._mcp_manager.call_tool(name, arguments)
+        return execute_tool(name, arguments, self._tool_ctx)

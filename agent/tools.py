@@ -94,6 +94,10 @@ def get_openai_schemas(enabled_names: list[str]) -> list[dict[str, Any]]:
     return [t.to_openai_schema() for t in get_enabled_tools(enabled_names)]
 
 
+def get_openai_schemas_from_defs(tools: list[ToolDef]) -> list[dict[str, Any]]:
+    return [t.to_openai_schema() for t in tools]
+
+
 def execute_tool(name: str, arguments: dict[str, Any], ctx: ToolContext) -> str:
     """
     执行工具。
