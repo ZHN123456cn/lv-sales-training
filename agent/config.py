@@ -91,11 +91,31 @@ class MemoryConfig:
 
 @dataclass
 class MCPServerConfig:
+    transport: str = "stdio"
     command: str = ""
     args: list[str] = field(default_factory=list)
     env: dict[str, str] = field(default_factory=dict)
     cwd: str | None = None
+    url: str = ""
+    headers: dict[str, str] = field(default_factory=dict)
     timeout: int = 30
+    connect_timeout: int | None = None
+    read_timeout: int | None = None
+    call_timeout: int | None = None
+    max_retries: int = 2
+    retry_backoff_seconds: float = 0.5
+
+    @property
+    def effective_connect_timeout(self) -> int | float:
+        return self.connect_timeout if self.connect_timeout is not None else self.timeout
+
+    @property
+    def effective_read_timeout(self) -> int | float:
+        return self.read_timeout if self.read_timeout is not None else self.timeout
+
+    @property
+    def effective_call_timeout(self) -> int | float:
+        return self.call_timeout if self.call_timeout is not None else self.timeout
 
 
 @dataclass
@@ -320,12 +340,35 @@ def load_config(config_path: Path | None = None) -> AgentConfig:
             for name, raw_server in servers_data.items():
                 if not isinstance(raw_server, dict):
                     continue
+                transport = str(raw_server.get("transport", "") or "").strip().lower()
+                if not transport:
+                    transport = "stdio" if raw_server.get("command") is not None else ""
                 server = MCPServerConfig(
+                    transport=transport,
                     command=str(raw_server.get("command", "")),
                     args=[str(v) for v in raw_server.get("args", [])],
                     env={str(k): str(v) for k, v in raw_server.get("env", {}).items()},
                     cwd=str(raw_server["cwd"]) if raw_server.get("cwd") is not None else None,
+                    url=str(raw_server.get("url", "")),
+                    headers={str(k): str(v) for k, v in raw_server.get("headers", {}).items()},
                     timeout=int(raw_server.get("timeout", 30)),
+                    connect_timeout=(
+                        int(raw_server["connect_timeout"])
+                        if raw_server.get("connect_timeout") is not None
+                        else None
+                    ),
+                    read_timeout=(
+                        int(raw_server["read_timeout"])
+                        if raw_server.get("read_timeout") is not None
+                        else None
+                    ),
+                    call_timeout=(
+                        int(raw_server["call_timeout"])
+                        if raw_server.get("call_timeout") is not None
+                        else None
+                    ),
+                    max_retries=int(raw_server.get("max_retries", 2)),
+                    retry_backoff_seconds=float(raw_server.get("retry_backoff_seconds", 0.5)),
                 )
                 cfg.mcp.servers[str(name)] = server
 

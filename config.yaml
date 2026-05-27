@@ -97,3 +97,6 @@ mcp:
       cwd: "C:/Users/hh/.openclaw/workspace/mcptest"
       env: {}
       timeout: 30
+    amap-maps:
+      transport: "sse"
+      url: "https://mcp.api-inference.modelscope.net/42f26258ab0d49/sse"

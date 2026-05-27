@@ -101,7 +101,7 @@ def _setup_readline(history_path: Path) -> None:
 VERSION = "0.1.0"
 
 HELP_TEXT = """
-可用命令：
+可用命令：  
   /help                显示此帮助
   /exit, /quit         退出程序
   /session new         创建新 Session
@@ -114,6 +114,7 @@ HELP_TEXT = """
   /tools               列出所有可用工具
   /skills              列出所有可用 Skill
   /skill <name>        显示指定 Skill 的 SKILL.md 路径和摘要
+  /mcp list            List MCP servers, transports, tools, and startup errors.
   /memory show         显示当前长期记忆文件内容（/memory 等价于 show）
   /memory daily [date] 显示每日记忆；不传 date 时读取今天
   /memory search <q>   搜索长期记忆与每日记忆
@@ -506,11 +507,15 @@ class CLI:
         for name, server in servers.items():
             state = "enabled" if self._config.mcp.enabled else "disabled"
             print(f"  {_bold(name)} [{state}]")
-            print(f"    command: {server.command}")
-            if server.args:
-                print(f"    args: {' '.join(server.args)}")
-            if server.cwd:
-                print(f"    cwd: {server.cwd}")
+            print(f"    transport: {server.transport}")
+            if server.transport == "stdio":
+                print(f"    command: {server.command}")
+                if server.args:
+                    print(f"    args: {' '.join(server.args)}")
+                if server.cwd:
+                    print(f"    cwd: {server.cwd}")
+            else:
+                print(f"    url: {server.url}")
 
             tools = tools_by_server.get(name, [])
             if not self._config.mcp.enabled:

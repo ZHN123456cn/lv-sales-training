@@ -33,7 +33,7 @@ class MCPManager:
         client_factory: ClientFactory | None = None,
     ) -> None:
         self._config = config
-        self._client_factory = client_factory or _create_stdio_client
+        self._client_factory = client_factory or _create_mcp_client
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._exit_stack: AsyncExitStack | None = None
@@ -109,29 +109,63 @@ class MCPManager:
     async def _start_async(self) -> None:
         self._exit_stack = AsyncExitStack()
         for server_name, server_config in self._config.mcp.servers.items():
-            if not server_config.command:
-                continue
-            cwd = self._config.resolved_mcp_cwd(server_config)
-            timeout = server_config.timeout
+            await self._start_server_with_retries(server_name, server_config)
+
+    async def _start_server_with_retries(
+        self,
+        server_name: str,
+        server_config: MCPServerConfig,
+    ) -> None:
+        attempts = max(0, server_config.max_retries) + 1
+        delay = max(0.0, server_config.retry_backoff_seconds)
+        last_error: Exception | None = None
+        for attempt in range(attempts):
             try:
-                client = await asyncio.wait_for(
-                    _maybe_await(self._client_factory(server_name, server_config, cwd)),
-                    timeout=timeout,
-                )
-                if hasattr(client, "__aenter__"):
-                    client = await self._exit_stack.enter_async_context(client)
-                client_stack = getattr(client, "_openclaw_exit_stack", None)
-                if client_stack is not None:
-                    self._exit_stack.push_async_callback(client_stack.aclose)
-                self._clients[server_name] = client
-                await asyncio.wait_for(_maybe_await(client.initialize()), timeout=timeout)
-                response = await asyncio.wait_for(_maybe_await(client.list_tools()), timeout=timeout)
-                for remote_tool in _response_tools(response):
-                    self._register_tool(server_name, remote_tool)
+                await self._start_server_once(server_name, server_config)
                 self._errors.pop(server_name, None)
+                return
             except Exception as exc:
-                self._errors[server_name] = str(exc) or exc.__class__.__name__
-                continue
+                last_error = exc
+                if attempt < attempts - 1 and delay > 0:
+                    await asyncio.sleep(delay * (2 ** attempt))
+        if last_error is not None:
+            self._errors[server_name] = str(last_error) or last_error.__class__.__name__
+
+    async def _start_server_once(
+        self,
+        server_name: str,
+        server_config: MCPServerConfig,
+    ) -> None:
+        _validate_server_config(server_name, server_config)
+        assert self._exit_stack is not None
+        cwd = self._config.resolved_mcp_cwd(server_config)
+        timeout = server_config.effective_connect_timeout
+        attempt_stack = AsyncExitStack()
+        client = None
+        try:
+            client = await asyncio.wait_for(
+                _maybe_await(self._client_factory(server_name, server_config, cwd)),
+                timeout=timeout,
+            )
+            if hasattr(client, "__aenter__"):
+                client = await attempt_stack.enter_async_context(client)
+            await asyncio.wait_for(_maybe_await(client.initialize()), timeout=timeout)
+            response = await asyncio.wait_for(_maybe_await(client.list_tools()), timeout=timeout)
+        except Exception:
+            client_stack = getattr(client, "_openclaw_exit_stack", None)
+            if client_stack is not None:
+                await client_stack.aclose()
+            await attempt_stack.aclose()
+            raise
+
+        client_stack = getattr(client, "_openclaw_exit_stack", None)
+        if client_stack is not None:
+            self._exit_stack.push_async_callback(client_stack.aclose)
+        if getattr(attempt_stack, "_exit_callbacks", None):
+            self._exit_stack.push_async_callback(attempt_stack.aclose)
+        self._clients[server_name] = client
+        for remote_tool in _response_tools(response):
+            self._register_tool(server_name, remote_tool)
 
     async def _stop_async(self) -> None:
         if self._exit_stack is not None:
@@ -144,7 +178,7 @@ class MCPManager:
     async def _call_tool_async(self, local_name: str, arguments: dict[str, Any]) -> str:
         tool = self._tools[local_name]
         client = self._clients[tool.server_name]
-        timeout = self._config.mcp.servers[tool.server_name].timeout
+        timeout = self._config.mcp.servers[tool.server_name].effective_call_timeout
         result = await asyncio.wait_for(
             _maybe_await(client.call_tool(tool.remote_name, arguments)),
             timeout=timeout,
@@ -204,6 +238,117 @@ async def _create_stdio_client(
     return session
 
 
+async def _create_mcp_client(
+    server_name: str,
+    server_config: MCPServerConfig,
+    cwd: Path | None,
+) -> Any:
+    if server_config.transport == "stdio":
+        return await _create_stdio_client(server_name, server_config, cwd)
+    if server_config.transport == "sse":
+        return await _create_sse_client(server_name, server_config, cwd)
+    if server_config.transport == "streamable_http":
+        return await _create_streamable_http_client(server_name, server_config, cwd)
+    raise RuntimeError(f"Unsupported MCP transport for {server_name}: {server_config.transport}")
+
+
+async def _create_sse_client(
+    server_name: str,
+    server_config: MCPServerConfig,
+    cwd: Path | None,
+) -> Any:
+    del cwd
+    try:
+        from mcp import ClientSession
+        from mcp.client.sse import sse_client
+    except ImportError as exc:
+        raise RuntimeError("mcp package with SSE client support is required") from exc
+
+    stack = AsyncExitStack()
+    read_stream, write_stream = await stack.enter_async_context(
+        sse_client(
+            server_config.url,
+            headers=_resolve_headers(server_name, server_config.headers),
+            timeout=server_config.effective_connect_timeout,
+            sse_read_timeout=server_config.effective_read_timeout,
+        )
+    )
+    session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+    session._openclaw_exit_stack = stack
+    return session
+
+
+async def _create_streamable_http_client(
+    server_name: str,
+    server_config: MCPServerConfig,
+    cwd: Path | None,
+) -> Any:
+    del cwd
+    try:
+        from mcp import ClientSession
+        from mcp.client.streamable_http import streamable_http_client
+    except ImportError as exc:
+        try:
+            from mcp import ClientSession
+            from mcp.client.streamable_http import streamablehttp_client as streamable_http_client
+        except ImportError:
+            raise RuntimeError("mcp package with Streamable HTTP client support is required") from exc
+    try:
+        import httpx
+    except ImportError as exc:
+        raise RuntimeError("httpx is required for MCP Streamable HTTP client support") from exc
+
+    stack = AsyncExitStack()
+    timeout = httpx.Timeout(
+        timeout=server_config.effective_read_timeout,
+        connect=server_config.effective_connect_timeout,
+    )
+    http_client = await stack.enter_async_context(
+        httpx.AsyncClient(
+            headers=_resolve_headers(server_name, server_config.headers),
+            timeout=timeout,
+        )
+    )
+    read_stream, write_stream, _ = await stack.enter_async_context(
+        streamable_http_client(
+            server_config.url,
+            http_client=http_client,
+        )
+    )
+    session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
+    session._openclaw_exit_stack = stack
+    return session
+
+
+def _validate_server_config(server_name: str, server_config: MCPServerConfig) -> None:
+    if server_config.transport not in {"stdio", "sse", "streamable_http"}:
+        raise RuntimeError(f"Unsupported MCP transport for {server_name}: {server_config.transport}")
+    if server_config.transport == "stdio" and not server_config.command:
+        raise RuntimeError(f"MCP stdio server {server_name} requires command")
+    if server_config.transport in {"sse", "streamable_http"} and not server_config.url:
+        raise RuntimeError(f"MCP {server_config.transport} server {server_name} requires url")
+
+
+def _resolve_headers(server_name: str, headers: dict[str, str]) -> dict[str, str]:
+    resolved = {}
+    for key, value in headers.items():
+        resolved[key] = _expand_env_placeholders(server_name, key, value)
+    return resolved
+
+
+def _expand_env_placeholders(server_name: str, header_name: str, value: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        env_name = match.group(1)
+        env_value = os.environ.get(env_name)
+        if env_value is None:
+            raise RuntimeError(
+                f"Missing environment variable {env_name} for MCP server {server_name} header {header_name}"
+            )
+        return env_value
+
+    return re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", replace, value)
+
+
 def _local_tool_name(server_name: str, remote_name: str) -> str:
     server = _sanitize_name(server_name)
     remote = _sanitize_name(remote_name)
@@ -257,11 +402,26 @@ def _format_content_item(item: Any) -> str:
         return item
     if isinstance(item, bytes):
         return item.decode("utf-8", errors="replace")
+    summary = _summarize_non_text_content(item)
+    if summary is not None:
+        return json.dumps(summary, ensure_ascii=False)
     if hasattr(item, "model_dump"):
         return json.dumps(item.model_dump(), ensure_ascii=False)
     if isinstance(item, dict):
         return json.dumps(item, ensure_ascii=False)
     return str(item)
+
+
+def _summarize_non_text_content(item: Any) -> dict[str, Any] | None:
+    content_type = _get_attr(item, "type", None)
+    if content_type in (None, "text"):
+        return None
+    summary: dict[str, Any] = {"type": content_type}
+    for key in ("mimeType", "mime_type", "uri", "name", "description"):
+        value = _get_attr(item, key, None)
+        if value is not None:
+            summary[key] = value
+    return summary
 
 
 def _get_attr(obj: Any, name: str, default: Any = None) -> Any:
