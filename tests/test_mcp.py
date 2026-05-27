@@ -9,7 +9,13 @@ import agent.loop as loop_module
 from agent.cli import CLI
 from agent.config import AgentConfig, MCPServerConfig, load_config
 from agent.llm import _BlockingLLMResponse
-from agent.mcp import MCPManager, MCPTool, _local_tool_name, _resolve_headers
+from agent.mcp import (
+    MCPManager,
+    MCPTool,
+    _effective_remote_read_timeout,
+    _local_tool_name,
+    _resolve_headers,
+)
 from agent.session import Session, SessionManager
 from tests.conftest import make_blocking_completion
 
@@ -126,6 +132,23 @@ def test_remote_header_env_interpolation(monkeypatch):
     headers = _resolve_headers("docs", {"Authorization": "Bearer ${TOKEN}"})
 
     assert headers == {"Authorization": "Bearer secret"}
+
+
+def test_remote_read_timeout_defaults_to_no_idle_timeout():
+    server = MCPServerConfig(transport="sse", url="https://example.com/sse", timeout=30)
+
+    assert _effective_remote_read_timeout(server) is None
+
+
+def test_remote_read_timeout_respects_explicit_value():
+    server = MCPServerConfig(
+        transport="sse",
+        url="https://example.com/sse",
+        timeout=30,
+        read_timeout=300,
+    )
+
+    assert _effective_remote_read_timeout(server) == 300
 
 
 def test_remote_header_missing_env_records_server_error(tmp_path, monkeypatch):

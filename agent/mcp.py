@@ -259,18 +259,37 @@ async def _create_sse_client(
 ) -> Any:
     del cwd
     try:
+        import httpx
         from mcp import ClientSession
         from mcp.client.sse import sse_client
     except ImportError as exc:
         raise RuntimeError("mcp package with SSE client support is required") from exc
+
+    connect_timeout = server_config.effective_connect_timeout
+    read_timeout = _effective_remote_read_timeout(server_config)
+
+    def _make_http_client(
+        headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+    ) -> httpx.AsyncClient:
+        """自定义 httpx 客户端工厂，强制 HTTP/1.1 以避免 SSE 连接关闭异常。"""
+        return httpx.AsyncClient(
+            headers=headers,
+            timeout=timeout or httpx.Timeout(connect_timeout, read=read_timeout),
+            auth=auth,
+            http2=False,
+            follow_redirects=True,
+        )
 
     stack = AsyncExitStack()
     read_stream, write_stream = await stack.enter_async_context(
         sse_client(
             server_config.url,
             headers=_resolve_headers(server_name, server_config.headers),
-            timeout=server_config.effective_connect_timeout,
-            sse_read_timeout=server_config.effective_read_timeout,
+            timeout=connect_timeout,
+            sse_read_timeout=read_timeout,
+            httpx_client_factory=_make_http_client,
         )
     )
     session = await stack.enter_async_context(ClientSession(read_stream, write_stream))
@@ -300,13 +319,15 @@ async def _create_streamable_http_client(
 
     stack = AsyncExitStack()
     timeout = httpx.Timeout(
-        timeout=server_config.effective_read_timeout,
+        timeout=_effective_remote_read_timeout(server_config),
         connect=server_config.effective_connect_timeout,
     )
     http_client = await stack.enter_async_context(
         httpx.AsyncClient(
             headers=_resolve_headers(server_name, server_config.headers),
             timeout=timeout,
+            http2=False,
+            follow_redirects=True,
         )
     )
     read_stream, write_stream, _ = await stack.enter_async_context(
@@ -327,6 +348,12 @@ def _validate_server_config(server_name: str, server_config: MCPServerConfig) ->
         raise RuntimeError(f"MCP stdio server {server_name} requires command")
     if server_config.transport in {"sse", "streamable_http"} and not server_config.url:
         raise RuntimeError(f"MCP {server_config.transport} server {server_name} requires url")
+
+
+def _effective_remote_read_timeout(server_config: MCPServerConfig) -> int | float | None:
+    if server_config.read_timeout is not None:
+        return server_config.read_timeout
+    return None
 
 
 def _resolve_headers(server_name: str, headers: dict[str, str]) -> dict[str, str]:
