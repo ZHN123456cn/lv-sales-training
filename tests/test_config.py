@@ -19,6 +19,7 @@ import yaml
 
 import agent.config as config_module
 from agent.config import AgentConfig, load_config
+from agent.agents import scope_for
 
 
 # ---------------------------------------------------------------------------
@@ -90,7 +91,7 @@ class TestDefaultValues:
         cfg = load_config(tmp_path / "nonexistent.yaml")
         assert cfg.memory.enabled is True
         assert cfg.memory.root_dir == ".agent_memory"
-        assert cfg.memory.daily_dir == "daily"
+        assert cfg.memory.daily_dir == "memory"
         assert cfg.resolved_memory_file() == (tmp_path / ".agent_memory" / "MEMORY.md").resolve()
 
 
@@ -308,6 +309,27 @@ class TestPathResolution:
         })
         with pytest.raises(ValueError):
             load_config(cfg_path)
+
+    def test_agent_scope_overrides_runtime_paths(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
+        cfg = load_config(tmp_path / "nonexistent.yaml")
+        cfg.project_root = tmp_path
+        cfg.agent_scope = scope_for(tmp_path, "work")
+
+        assert cfg.resolved_work_dir() == (tmp_path / "workspace_work").resolve()
+        assert cfg.resolved_session_dir() == (tmp_path / "workspace_work" / "sessions").resolve()
+        assert cfg.resolved_skill_dirs() == [(tmp_path / "workspace_work" / "skills").resolve()]
+        assert cfg.resolved_memory_dir() == (tmp_path / "workspace_work").resolve()
+        assert cfg.resolved_memory_file() == (tmp_path / "workspace_work" / "MEMORY.md").resolve()
+
+    def test_mcp_relative_cwd_uses_agent_workspace(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
+        cfg = load_config(tmp_path / "nonexistent.yaml")
+        cfg.project_root = tmp_path
+        cfg.agent_scope = scope_for(tmp_path, "work")
+        server = config_module.MCPServerConfig(cwd=".")
+
+        assert cfg.resolved_mcp_cwd(server) == (tmp_path / "workspace_work").resolve()
 
 
 # ---------------------------------------------------------------------------

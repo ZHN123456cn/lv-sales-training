@@ -8,6 +8,7 @@ codeview.md
 .claude/
 .debug_memory_tmp/
 skills/
+workspace*/
 __pycache__/
 .pytest_cache/
 *.pyc

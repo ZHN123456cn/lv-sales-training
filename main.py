@@ -6,6 +6,7 @@
   python main.py --resume                  # 恢复最近会话
   python main.py --session <id>            # 恢复指定会话
   python main.py --message "你好"          # 单条消息模式（非交互）
+  python main.py --agent work              # 启动指定 Agent
   python main.py --config /path/config.yaml
 """
 
@@ -52,7 +53,53 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="禁用流式输出（覆盖配置文件设置）",
     )
+    parser.add_argument(
+        "--agent",
+        type=str,
+        default=None,
+        metavar="NAME",
+        help="启动指定 Agent（默认：main）",
+    )
     return parser.parse_args()
+
+
+def setup_agent_scope(config, agent_arg: str | None, interactive: bool) -> None:
+    """解析并绑定当前 AgentScope。"""
+    import os
+    from agent.agents import (
+        ensure_agent_workspace,
+        ensure_agent_workspace_contents,
+        normalize_agent_id,
+        read_identity,
+        scope_for,
+        workspace_exists,
+    )
+
+    raw_agent = agent_arg or os.environ.get("AGENT_ID") or config.agents.default or "main"
+    try:
+        agent_id = normalize_agent_id(raw_agent)
+    except ValueError as exc:
+        print(f"[错误] Agent 名称非法：{exc}", file=sys.stderr)
+        sys.exit(1)
+
+    scope = scope_for(config.project_root, agent_id)
+    if not workspace_exists(config.project_root, agent_id):
+        if not interactive:
+            print(
+                f"[错误] Agent 不存在：{agent_id}（workspace：{scope.workspace_dir}）",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        answer = input(f"[系统] Agent '{agent_id}' 不存在，是否创建？[y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            print(f"[错误] Agent 不存在：{agent_id}", file=sys.stderr)
+            sys.exit(1)
+        ensure_agent_workspace(scope)
+    else:
+        ensure_agent_workspace_contents(scope)
+
+    config.agent_scope = scope
+    config.identity_text = read_identity(scope)
 
 
 def resolve_session(args, session_mgr, config):
@@ -122,6 +169,7 @@ def main() -> None:
     # 命令行覆盖
     if args.no_stream:
         config.llm.streaming = False
+    setup_agent_scope(config, args.agent, interactive=args.message is None)
 
     # 检查 API Key
     if not config.llm.api_key:

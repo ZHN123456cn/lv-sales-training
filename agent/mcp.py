@@ -8,7 +8,7 @@ import threading
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 from .config import AgentConfig, MCPServerConfig
 from .tools import ToolContext, ToolDef
@@ -23,7 +23,7 @@ class MCPTool:
     schema: dict[str, Any]
 
 
-ClientFactory = Callable[[str, MCPServerConfig, Path | None], Any]
+ClientFactory = Callable[[str, MCPServerConfig, Optional[Path]], Any]
 
 
 class MCPManager:

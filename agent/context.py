@@ -35,8 +35,15 @@ class ContextManager:
         skills_prompt = format_skills_for_prompt(skills)
         parts = [
             self._config.formatted_system_prompt(),
+            f"Agent ID: {self._config.agent_scope.id if self._config.agent_scope else 'main'}",
+            f"Agent workspace: {self._config.resolved_work_dir()}",
             f"Session ID: {session.id}",
             f"Current work directory: {tool_ctx.work_dir}",
+        ]
+        if self._config.identity_text.strip():
+            parts.append(f"<identity>\n{self._config.identity_text.strip()}\n</identity>")
+
+        parts.extend([
             (
                 "Skill rules:\n"
                 "- <available_skills> is an index, not the full instructions.\n"
@@ -45,7 +52,7 @@ class ContextManager:
                 "- Relative references such as references/ or scripts/ are resolved from the Skill BaseDir."
             ),
             skills_prompt,
-        ]
+        ])
 
         if self._memory_store is not None:
             parts.append(

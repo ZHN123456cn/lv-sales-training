@@ -297,7 +297,7 @@ def test_agent_loop_dispatches_mcp_tool(monkeypatch, default_config: AgentConfig
     assert result == "done"
     tool_messages = [m for m in empty_session.messages if m["role"] == "tool"]
     assert tool_messages[0]["content"] == "mcp-result:fs__read_file:README.md"
-    sent_tools = llm.chat_blocking.call_args_list[0].kwargs["tools"]
+    sent_tools = llm.chat_blocking.call_args_list[0][1]["tools"]
     assert any(t["function"]["name"] == "fs__read_file" for t in sent_tools)
 
 

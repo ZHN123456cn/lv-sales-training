@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from .agents import AgentScope
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -64,7 +65,7 @@ class MemoryConfig:
     backend: str = "markdown"
     root_dir: str = ".agent_memory"
     long_term_file: str = "MEMORY.md"
-    daily_dir: str = "daily"
+    daily_dir: str = "memory"
     context_max_inject_chars: int = 16_384
     context_inject_when_empty: bool = True
     search_keyword_enabled: bool = True
@@ -125,12 +126,18 @@ class MCPConfig:
 
 
 @dataclass
+class AgentsConfig:
+    default: str = "main"
+
+
+@dataclass
 class AgentConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
+    agents: AgentsConfig = field(default_factory=AgentsConfig)
     max_iterations: int = 20
     work_dir: str = "."
     system_prompt: str = (
@@ -155,9 +162,13 @@ class AgentConfig:
     # 运行时属性（非配置，由 load_config 填充）
     config_path: Path = field(default_factory=lambda: PROJECT_ROOT / "config.yaml")
     project_root: Path = field(default_factory=lambda: PROJECT_ROOT)
+    agent_scope: AgentScope | None = None
+    identity_text: str = ""
 
     def resolved_work_dir(self) -> Path:
         """返回绝对工作目录路径。"""
+        if self.agent_scope is not None:
+            return self.agent_scope.workspace_dir
         p = Path(self.work_dir)
         if p.is_absolute():
             return p
@@ -165,6 +176,8 @@ class AgentConfig:
 
     def resolved_session_dir(self) -> Path:
         """返回绝对 session 目录路径。"""
+        if self.agent_scope is not None:
+            return self.agent_scope.session_dir
         p = Path(self.session.dir)
         if p.is_absolute():
             return p
@@ -172,6 +185,8 @@ class AgentConfig:
 
     def resolved_skill_dirs(self) -> list[Path]:
         """返回绝对 Skill 根目录列表。"""
+        if self.agent_scope is not None:
+            return [self.agent_scope.skills_dir]
         result = []
         for raw in self.skills.dirs:
             p = Path(raw)
@@ -179,12 +194,16 @@ class AgentConfig:
         return result
 
     def resolved_memory_dir(self) -> Path:
+        if self.agent_scope is not None:
+            return self.agent_scope.workspace_dir
         p = Path(self.memory.root_dir)
         if p.is_absolute():
             return p
         return (self.project_root / p).resolve()
 
     def resolved_memory_file(self) -> Path:
+        if self.agent_scope is not None:
+            return self.agent_scope.memory_path
         memory_file = Path(self.memory.long_term_file)
         if memory_file.name != self.memory.long_term_file or self.memory.long_term_file in ("", ".", ".."):
             raise ValueError("memory.long_term_file must be a plain filename")
@@ -196,7 +215,7 @@ class AgentConfig:
         p = Path(server.cwd)
         if p.is_absolute():
             return p
-        return (self.project_root / p).resolve()
+        return (self.resolved_work_dir() / p).resolve()
 
     def formatted_system_prompt(self) -> str:
         return self.system_prompt.format(work_dir=str(self.resolved_work_dir()))
@@ -371,6 +390,11 @@ def load_config(config_path: Path | None = None) -> AgentConfig:
                     retry_backoff_seconds=float(raw_server.get("retry_backoff_seconds", 0.5)),
                 )
                 cfg.mcp.servers[str(name)] = server
+
+    agents_data: dict = yaml_data.get("agents", {})
+    if isinstance(agents_data, dict):
+        if "default" in agents_data:
+            cfg.agents.default = str(agents_data["default"])
 
     agent_data: dict = yaml_data.get("agent", {})
     for key, val in agent_data.items():

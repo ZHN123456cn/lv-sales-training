@@ -14,14 +14,17 @@ llm:
 
 agent:
   max_iterations: 20                      # 单次 loop 最大工具调用轮数
-  work_dir: "."                           # 工作目录（相对于 project_class/）
+  work_dir: "."                           # 未绑定 AgentScope 时的兼容工作目录
   system_prompt: |
     你是一个智能助手，可以使用工具帮助用户完成任务。
     工作目录为 {work_dir}。
     在使用工具时，请逐步思考并说明你的操作意图。
 
+agents:
+  default: main                           # 默认 Agent；main -> workspace/
+
 session:
-  dir: ".sessions"                        # Session 文件存储目录
+  dir: ".sessions"                        # 未绑定 AgentScope 时的兼容 Session 目录
   max_history: 100                        # 单 Session 最多保留消息轮数
   auto_save: true                         # 每轮对话后自动保存
 
@@ -42,7 +45,7 @@ tools:
 skills:
   enabled: true                           # 启用 AgentSkills 风格的 Skill
   dirs:
-    - "skills"                            # 相对于 project_class/ 的 Skill 根目录
+    - "skills"                            # 未绑定 AgentScope 时的兼容 Skill 根目录
   max_file_bytes: 262144                  # 单个 SKILL.md 最大读取字节数
   max_prompt_items: 50                    # 注入上下文的 Skill 摘要数量上限
   max_description_chars: 240              # 单个 description 最大长度
@@ -50,9 +53,9 @@ skills:
 memory:
   enabled: true
   backend: markdown
-  root_dir: ".agent_memory"
+  root_dir: ".agent_memory"               # 未绑定 AgentScope 时的兼容 Memory 目录
   long_term_file: "MEMORY.md"
-  daily_dir: "daily"
+  daily_dir: "memory"
   context:
     max_inject_chars: 16384
     inject_when_empty: true

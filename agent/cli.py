@@ -78,6 +78,7 @@ def _setup_readline(history_path: Path) -> None:
             "/help", "/exit", "/quit",
             "/session new", "/session list", "/session load ",
             "/session info", "/session delete ",
+            "/agent list", "/agent create ", "/agent ",
             "/history", "/clear", "/tools", "/config", 
             "/skills", "/skill ", "/memory", "/mcp list",
         ]
@@ -109,6 +110,9 @@ HELP_TEXT = """
   /session load <id>   切换到指定 Session
   /session info        显示当前 Session 信息
   /session delete <id> 删除指定 Session
+  /agent list          列出所有 Agent
+  /agent create <name> 创建 Agent workspace（不切换）
+  /agent <name>        切换到指定 Agent
   /history             显示当前对话历史（摘要）
   /clear               清空当前对话历史（不删除文件）
   /tools               列出所有可用工具
@@ -145,13 +149,13 @@ class CLI:
         self._loop: AgentLoop | None = None
         self._running = True
 
-    def _reset_loop(self) -> None:
+    def _reset_loop(self, reload_skills: bool = False) -> None:
         """Session 切换后重建 loop。"""
         from .llm import LLMClient
         from .skills import load_skills
         if self._loop is not None:
             self._loop.close()
-        if self._skill_registry is None:
+        if reload_skills or self._skill_registry is None:
             self._skill_registry = load_skills(self._config)
         llm = LLMClient(self._config.llm)
         self._loop = AgentLoop(self._config, self._session, llm, self._skill_registry)
@@ -204,6 +208,9 @@ class CLI:
 
         elif verb == "/session":
             self._handle_session_cmd(parts[1:] if len(parts) > 1 else [])
+
+        elif verb == "/agent":
+            self._handle_agent_cmd(parts[1:] if len(parts) > 1 else [])
 
         elif verb == "/history":
             self._print_history()
@@ -271,6 +278,22 @@ class CLI:
 
         else:
             self._err_print(f"未知 session 子命令：{sub}")
+
+    def _handle_agent_cmd(self, args: list[str]) -> None:
+        if not args:
+            self._err_print("用法：/agent list | create <name> | <name>")
+            return
+
+        sub = args[0].lower()
+        if sub == "list":
+            self._list_agents()
+        elif sub == "create":
+            if len(args) < 2:
+                self._err_print("用法：/agent create <name>")
+            else:
+                self._create_agent(args[1])
+        else:
+            self._switch_agent(args[0])
 
     # ------------------------------------------------------------------
     # Agent 消息处理
@@ -356,6 +379,12 @@ class CLI:
         except FileNotFoundError:
             self._err_print(f"Session 不存在：{session_id}")
 
+    def _latest_or_new_session(self) -> Session:
+        session = self._session_mgr.get_latest_session()
+        if session is not None:
+            return session
+        return self._session_mgr.new_session(work_dir=str(self._config.resolved_work_dir()))
+
     def _session_info(self) -> None:
         s = self._session
         msg_count = len([m for m in s.messages if m.get("role") in ("user", "assistant")])
@@ -435,6 +464,7 @@ class CLI:
     def _print_config(self) -> None:
         cfg = self._config
         print(_blue("当前配置："))
+        print(f"  Agent：     {cfg.agent_scope.id if cfg.agent_scope else 'main'}")
         print(f"  模型：      {cfg.llm.model}")
         print(f"  API Base：  {cfg.llm.base_url}")
         print(f"  Provider：  {cfg.llm.provider}")
@@ -450,6 +480,76 @@ class CLI:
             print(f"  Memory FTS5： {status['fts5_enabled']}")
             print(f"  Memory sqlite-vec： {status['sqlite_vec_enabled']}")
         print(f"  配置文件：  {cfg.config_path}")
+
+    def _list_agents(self) -> None:
+        from .agents import list_agents
+
+        agents = list_agents(self._config.project_root)
+        if not agents:
+            self._sys_print("暂无 Agent。")
+            return
+        current = self._config.agent_scope.id if self._config.agent_scope else "main"
+        print(_blue("Agent 列表："))
+        for agent in agents:
+            marker = " ← 当前" if agent.id == current else ""
+            print(f"  {_yellow(agent.id)}  {agent.workspace_dir}{marker}")
+
+    def _create_agent(self, name: str) -> None:
+        from .agents import ensure_agent_workspace, normalize_agent_id, scope_for
+
+        try:
+            agent_id = normalize_agent_id(name)
+        except ValueError as e:
+            self._err_print(str(e))
+            return
+        scope = scope_for(self._config.project_root, agent_id)
+        existed = scope.workspace_dir.exists()
+        ensure_agent_workspace(scope)
+        if existed:
+            self._sys_print(f"Agent 已存在，已补齐内部结构：{agent_id} -> {scope.workspace_dir}")
+        else:
+            self._sys_print(f"已创建 Agent：{agent_id} -> {scope.workspace_dir}")
+
+    def _switch_agent(self, name: str) -> None:
+        from .agents import (
+            ensure_agent_workspace_contents,
+            normalize_agent_id,
+            read_identity,
+            scope_for,
+            workspace_exists,
+        )
+
+        try:
+            agent_id = normalize_agent_id(name)
+        except ValueError as e:
+            self._err_print(str(e))
+            return
+        current = self._config.agent_scope.id if self._config.agent_scope else "main"
+        if agent_id == current:
+            self._sys_print(f"已经在 Agent：{agent_id}")
+            return
+        if not workspace_exists(self._config.project_root, agent_id):
+            self._err_print(f"Agent 不存在：{agent_id}。请先使用 /agent create {agent_id}")
+            return
+
+        try:
+            if self._config.session.auto_save:
+                self._session_mgr.save_session(self._session)
+            if self._loop is not None:
+                self._loop.close()
+
+            scope = scope_for(self._config.project_root, agent_id)
+            ensure_agent_workspace_contents(scope)
+            self._config.agent_scope = scope
+            self._config.identity_text = read_identity(scope)
+            self._session_mgr = SessionManager(self._config.resolved_session_dir())
+            self._session = self._latest_or_new_session()
+            self._reset_loop(reload_skills=True)
+            self._sys_print(
+                f"已切换到 Agent：{agent_id}；workspace：{scope.workspace_dir}；Session：{self._session.id}"
+            )
+        except Exception as e:
+            self._err_print(f"切换 Agent 失败：{e}")
 
     def _handle_memory_cmd(self, args: list[str]) -> None:
         store = self._loop.memory_store
@@ -557,6 +657,7 @@ class CLI:
         title = self._session.title or "(新对话)"
         work_dir = self._loop.tool_ctx.work_dir
         print(_bold(f"\nAgent v{VERSION}"))
+        print(_gray(f"Agent：{self._config.agent_scope.id if self._config.agent_scope else 'main'}"))
         print(_gray(f"Session：{self._session.id}"))
         print(_gray(f"工作目录：{work_dir}"))
         print(_gray(f"模型：{self._config.llm.model}"))

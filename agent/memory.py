@@ -575,6 +575,14 @@ class MarkdownMemoryStore:
             embedding = self._embed_text(item.text)
             if embedding is not None:
                 conn.execute(
+                    "INSERT OR REPLACE INTO memory_index_meta (key, value) VALUES (?, ?)",
+                    ("embedding_provider", self.config.embedding_provider),
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO memory_index_meta (key, value) VALUES (?, ?)",
+                    ("embedding_model", self.config.embedding_model),
+                )
+                conn.execute(
                     """
                     INSERT INTO memory_vectors (item_id, embedding) VALUES (?, ?)
                     ON CONFLICT(item_id) DO UPDATE SET embedding=excluded.embedding
@@ -1002,6 +1010,12 @@ def _tokenize_terms(text: str) -> list[str]:
     terms: list[str] = []
     if jieba is not None:
         terms.extend(token.strip().lower() for token in jieba.cut_for_search(text) if _is_search_term(token))
+    else:
+        for chunk in re.findall(r"[\u4e00-\u9fff]+", text):
+            terms.append(chunk)
+            for size in (2, 3, 4):
+                if len(chunk) >= size:
+                    terms.extend(chunk[i:i + size] for i in range(len(chunk) - size + 1))
     terms.extend(term.lower() for term in re.findall(r"[A-Za-z0-9_./:-]+", text, flags=re.UNICODE))
     seen: set[str] = set()
     result: list[str] = []
