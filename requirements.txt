@@ -1,0 +1,12 @@
+# Python >= 3.10 required
+
+openai>=1.0.0
+python-dotenv>=1.0.0
+pyyaml>=6.0
+colorama>=0.4.6
+sqlite-vec
+jieba>=0.42.1
+mcp>=1.9.3
+
+# Windows 下需要 readline 支持（Linux/Mac 内置）
+# pyreadline3>=3.4.1   # 取消注释以在 Windows 启用 readline 历史

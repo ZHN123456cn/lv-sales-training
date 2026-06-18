@@ -1,1 +1,15 @@
 .venv/
+.env
+config.yaml
+check_index.py
+_diagnose_vec.py
+codeview.md
+.sessions/
+.agent_memory/
+.claude/
+.debug_memory_tmp/
+skills/
+workspace*/
+__pycache__/
+.pytest_cache/
+*.pyc

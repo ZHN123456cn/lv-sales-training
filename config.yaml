@@ -1,0 +1,102 @@
+# project_class/config.example.yaml
+# 复制此文件为 config.yaml 并填写你的配置。
+# API Key 建议放在 .env 文件中（AGENT_API_KEY=xxx），避免提交到版本库。
+
+llm:
+  provider: deepseek                      # 支持: deepseek | openai | custom
+  api_key: ""                             # 留空则从 AGENT_API_KEY 环境变量读取
+  base_url: "https://api.deepseek.com" # DeepSeek 兼容 OpenAI 接口
+  model: "deepseek-v4-pro"
+  temperature: 0.7
+  timeout: 60
+  max_retries: 3
+  streaming: true                         # 启用流式输出
+
+agent:
+  max_iterations: 50                      # 单次 loop 最大工具调用轮数
+  work_dir: "."                           # 工作目录（相对于 project_class/）
+  system_prompt: |
+    你是一个智能助手，可以使用工具帮助用户完成任务。
+    工作目录为 {work_dir}。
+    在使用工具时，请逐步思考并说明你的操作意图。
+
+session:
+  dir: ".sessions"                        # Session 文件存储目录
+  max_history: 100                        # 单 Session 最多保留消息轮数
+  auto_save: true                         # 每轮对话后自动保存
+
+tools:
+  enabled:                                # 启用的工具，注释掉即可禁用
+    - skill_read
+    - memory_read
+    - memory_search
+    - memory_write
+    - memory_reindex
+    - read_file
+    - write_file
+    - list_dir
+    - change_dir
+    - shell
+    - search_files
+
+skills:
+  enabled: true                           # 启用 AgentSkills 风格的 Skill
+  dirs:
+    - "skills"                            # 相对于 project_class/ 的 Skill 根目录
+  max_file_bytes: 262144                  # 单个 SKILL.md 最大读取字节数
+  max_prompt_items: 50                    # 注入上下文的 Skill 摘要数量上限
+  max_description_chars: 240              # 单个 description 最大长度
+
+memory:
+  enabled: true
+  backend: markdown
+  root_dir: ".agent_memory"
+  long_term_file: "MEMORY.md"
+  daily_dir: "daily"
+  context:
+    max_inject_chars: 16384
+    inject_when_empty: true
+  search:
+    keyword_enabled: true
+    vector_enabled: true
+    hybrid_enabled: true
+    max_results: 5
+    max_snippet_chars: 500
+    embedding:
+      provider: ollama
+      base_url: "http://localhost:11500"
+      model: "qwen3-embedding:0.6b"
+      timeout: 30
+  promotion:
+    enabled: true
+    min_recall_count: 3
+  write:
+    max_text_chars: 2048
+    admission:
+      explicit_user_intent: true
+      model_inferred_stable_fact: true
+    sensitive_patterns:
+      - "(?i)api[_-]?key"
+      - "\\b[0-9]{11}\\b"
+      - "(?i)password"
+      - "(?i)cookie"
+
+mcp:
+  enabled: true
+  servers:
+    filesystem:
+      command: "npx"
+      args: ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      cwd: "."
+      env: {}
+      timeout: 30
+    hello-world:
+      command: "C:/Users/hh/.openclaw/workspace/mcptest/.venv/Scripts/python.exe"
+      args:
+        - "C:/Users/hh/.openclaw/workspace/mcptest/servermcp/server.py"
+      cwd: "C:/Users/hh/.openclaw/workspace/mcptest"
+      env: {}
+      timeout: 30
+    amap-maps:
+      transport: "sse"
+      url: "https://mcp.api-inference.modelscope.net/42f26258ab0d49/sse"
