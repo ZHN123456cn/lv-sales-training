@@ -1,0 +1,346 @@
+﻿<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LV 销售培训系统 - 智能 Agent 演示</title>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600;700&family=Montserrat:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--gold:#C9A961;--gold-light:#E8D5A3;--dark:#0D0D0D;--dark-gray:#1A1A1A;--medium-gray:#2A2A2A;--text-light:#F5F5F5;--text-muted:#999}
+body{font-family:Montserrat,sans-serif;background:var(--dark);color:var(--text-light);line-height:1.7;overflow-x:hidden}
+h1,h2,h3{font-family:Cormorant Garamond,serif;font-weight:400}
+.hero{min-height:100vh;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;position:relative;background:linear-gradient(180deg,var(--dark) 0%,var(--dark-gray) 100%);padding:2rem}
+.logo-monogram{font-family:Cormorant Garamond,serif;font-size:1.2rem;letter-spacing:.5em;color:var(--gold);margin-bottom:3rem;text-transform:uppercase}
+.hero h1{font-size:clamp(3rem,8vw,6rem);font-weight:300;letter-spacing:.15em;margin-bottom:1.5rem;background:linear-gradient(135deg,var(--text-light) 0%,var(--gold-light) 50%,var(--text-light) 100%);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.hero-subtitle{font-size:1.1rem;font-weight:300;letter-spacing:.3em;color:var(--text-muted);margin-bottom:3rem;text-transform:uppercase}
+.hero-tagline{font-family:Cormorant Garamond,serif;font-size:1.4rem;font-style:italic;color:var(--gold-light);max-width:600px;margin-bottom:4rem}
+.scroll-indicator{position:absolute;bottom:3rem;left:50%;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:.5rem;color:var(--text-muted);font-size:.75rem;letter-spacing:.2em;animation:float 2s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(10px)}}
+.scroll-indicator svg{width:24px;height:24px;stroke:var(--gold)}
+.nav{position:fixed;top:0;left:0;right:0;padding:1.5rem 3rem;display:flex;justify-content:space-between;align-items:center;background:rgba(13,13,13,.9);backdrop-filter:blur(20px);z-index:1000;border-bottom:1px solid rgba(201,169,97,.1)}
+.nav-brand{font-family:Cormorant Garamond,serif;font-size:1rem;letter-spacing:.3em;color:var(--gold)}
+.nav-links{display:flex;gap:3rem;list-style:none}
+.nav-links a{color:var(--text-muted);text-decoration:none;font-size:.8rem;letter-spacing:.15em;text-transform:uppercase;transition:color .3s}
+.nav-links a:hover{color:var(--gold)}
+section{padding:8rem 2rem;max-width:1400px;margin:0 auto}
+.section-label{font-size:.75rem;letter-spacing:.3em;color:var(--gold);text-transform:uppercase;margin-bottom:1rem}
+.section-title{font-size:clamp(2rem,4vw,3rem);margin-bottom:1.5rem;color:var(--text-light)}
+.section-desc{color:var(--text-muted);max-width:700px;margin-bottom:4rem;font-weight:300}
+.architecture{background:var(--dark-gray);padding:8rem 2rem}
+.arch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:2rem;max-width:1400px;margin:0 auto}
+.arch-card{background:var(--dark);border:1px solid rgba(201,169,97,.2);padding:2.5rem;transition:all .4s;position:relative;overflow:hidden}
+.arch-card::before{content:'';position:absolute;top:0;left:0;width:100%;height:2px;background:linear-gradient(90deg,transparent,var(--gold),transparent);transform:scaleX(0);transition:transform .4s}
+.arch-card:hover::before{transform:scaleX(1)}
+.arch-card:hover{border-color:var(--gold);transform:translateY(-5px)}
+.arch-icon{width:48px;height:48px;margin-bottom:1.5rem;stroke:var(--gold);fill:none;stroke-width:1.5}
+.arch-card h3{font-size:1.5rem;margin-bottom:1rem;color:var(--text-light)}
+.arch-card p{color:var(--text-muted);font-size:.9rem;font-weight:300}
+.modules{background:var(--dark)}
+.modules-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(350px,1fr));gap:1.5rem;max-width:1400px;margin:0 auto}
+.module-card{background:var(--dark-gray);border:1px solid rgba(255,255,255,.05);padding:2rem;cursor:pointer;transition:all .3s;position:relative}
+.module-card:hover{background:var(--medium-gray);border-color:var(--gold)}
+.module-number{font-family:Cormorant Garamond,serif;font-size:3rem;color:rgba(201,169,97,.2);position:absolute;top:1rem;right:1.5rem}
+.module-title{font-size:1.2rem;margin-bottom:.75rem;color:var(--text-light)}
+.module-desc{font-size:.85rem;color:var(--text-muted);font-weight:300}
+.module-content{max-height:0;overflow:hidden;transition:max-height .5s,padding .5s;color:var(--text-muted);font-size:.85rem}
+.module-card.active .module-content{max-height:500px;padding-top:1rem;border-top:1px solid rgba(201,169,97,.2);margin-top:1rem}
+.module-content ul{list-style:none;padding-left:0}
+.module-content li{padding:.5rem 0;border-bottom:1px solid rgba(255,255,255,.03);display:flex;align-items:flex-start;gap:.75rem}
+.module-content li::before{content:'*';color:var(--gold);font-size:.5rem;margin-top:.4rem}
+.demo-section{background:linear-gradient(180deg,var(--dark-gray) 0%,var(--dark) 100%);padding:8rem 2rem}
+.demo-container{max-width:1000px;margin:0 auto}
+.demo-window{background:var(--dark);border:1px solid rgba(201,169,97,.3);border-radius:8px;overflow:hidden}
+.demo-header{background:var(--medium-gray);padding:1rem 1.5rem;display:flex;align-items:center;gap:1rem}
+.demo-dots{display:flex;gap:.5rem}
+.demo-dot{width:12px;height:12px;border-radius:50%;background:var(--text-muted)}
+.demo-dot:first-child{background:#FF5F57}
+.demo-dot:nth-child(2){background:#FEBC2E}
+.demo-dot:nth-child(3){background:#28C840}
+.demo-title{font-size:.85rem;color:var(--text-muted);letter-spacing:.1em}
+.demo-body{padding:2rem;min-height:400px;display:flex;flex-direction:column}
+.chat-message{max-width:85%;margin-bottom:1.5rem;animation:fadeIn .3s}
+@keyframes fadeIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+.chat-message.customer{align-self:flex-end}
+.chat-message.sales,.chat-message.coach{align-self:flex-start}
+.chat-message.coach{border-left:2px solid var(--gold);padding-left:1rem}
+.chat-bubble{padding:1rem 1.25rem;border-radius:4px;font-size:.9rem;line-height:1.6}
+.chat-message.customer .chat-bubble{background:rgba(201,169,97,.15);color:var(--text-light)}
+.chat-message.sales .chat-bubble{background:var(--medium-gray);color:var(--text-light)}
+.chat-message.coach .chat-bubble{background:transparent;border:1px solid rgba(201,169,97,.3)}
+.chat-sender{font-size:.7rem;color:var(--gold);letter-spacing:.1em;margin-bottom:.5rem;text-transform:uppercase}
+.chat-message.coach .chat-sender{display:flex;align-items:center;gap:.5rem}
+.chat-message.coach .chat-sender::after{content:'';flex:1;height:1px;background:rgba(201,169,97,.3)}
+.demo-input{display:flex;gap:1rem;margin-top:auto;padding-top:1.5rem;border-top:1px solid rgba(255,255,255,.05)}
+.demo-input input{flex:1;background:var(--medium-gray);border:1px solid rgba(255,255,255,.1);padding:1rem 1.5rem;color:var(--text-light);font-family:inherit;font-size:.9rem;border-radius:4px;outline:none;transition:border-color .3s}
+.demo-input input:focus{border-color:var(--gold)}
+.demo-input button{background:var(--gold);color:var(--dark);border:none;padding:1rem 2rem;font-family:inherit;font-size:.8rem;letter-spacing:.15em;text-transform:uppercase;cursor:pointer;border-radius:4px;transition:all .3s}
+.demo-input button:hover{background:var(--gold-light)}
+.features{background:var(--dark)}
+.features-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:rgba(201,169,97,.1);max-width:1400px;margin:0 auto}
+.feature-item{background:var(--dark);padding:3rem 2rem;text-align:center;transition:background .3s}
+.feature-item:hover{background:var(--dark-gray)}
+.feature-number{font-family:Cormorant Garamond,serif;font-size:4rem;color:var(--gold);opacity:.3;margin-bottom:1rem}
+.feature-title{font-size:1rem;letter-spacing:.15em;text-transform:uppercase;margin-bottom:.75rem;color:var(--text-light)}
+.feature-desc{font-size:.85rem;color:var(--text-muted);font-weight:300}
+.rag-system{background:var(--dark-gray);padding:8rem 2rem}
+.rag-flow{display:flex;align-items:center;justify-content:center;gap:2rem;flex-wrap:wrap;max-width:1200px;margin:0 auto}
+.rag-step{text-align:center;flex:1;min-width:200px;max-width:250px}
+.rag-icon{width:80px;height:80px;margin:0 auto 1.5rem;background:var(--dark);border:1px solid var(--gold);border-radius:50%;display:flex;align-items:center;justify-content:center}
+.rag-icon svg{width:32px;height:32px;stroke:var(--gold);fill:none;stroke-width:1.5}
+.rag-step h4{font-family:Cormorant Garamond,serif;font-size:1.3rem;margin-bottom:.5rem;color:var(--text-light)}
+.rag-step p{font-size:.8rem;color:var(--text-muted);font-weight:300}
+.rag-arrow{color:var(--gold);font-size:2rem;opacity:.5}
+footer{background:var(--dark);border-top:1px solid rgba(201,169,97,.1);padding:4rem 2rem;text-align:center}
+.footer-logo{font-family:Cormorant Garamond,serif;font-size:1.5rem;letter-spacing:.5em;color:var(--gold);margin-bottom:2rem}
+.footer-links{display:flex;justify-content:center;gap:3rem;margin-bottom:2rem;flex-wrap:wrap}
+.footer-links a{color:var(--text-muted);text-decoration:none;font-size:.8rem;letter-spacing:.1em;transition:color .3s}
+.footer-links a:hover{color:var(--gold)}
+.footer-copy{font-size:.75rem;color:var(--text-muted);opacity:.6}
+.score-badge{display:inline-flex;align-items:center;gap:.5rem;background:rgba(201,169,97,.2);padding:.25rem .75rem;border-radius:2px;font-size:.75rem;color:var(--gold);margin-top:.5rem}
+.score-badge.good{background:rgba(40,200,64,.2);color:#28C840}
+.score-badge.warning{background:rgba(254,188,46,.2);color:#FEBC2E}
+@media(max-width:768px){.nav{padding:1rem 1.5rem}.nav-links{display:none}section{padding:5rem 1.5rem}.features-grid{grid-template-columns:repeat(2,1fr)}.rag-flow{flex-direction:column}.rag-arrow{transform:rotate(90deg)}}
+</style>
+</head>
+<body>
+<nav class="nav">
+<div class="nav-brand">LV Training</div>
+<ul class="nav-links">
+<li><a href="#architecture">架构</a></li>
+<li><a href="#modules">培训模块</a></li>
+<li><a href="#demo">演示</a></li>
+<li><a href="#rag">RAG系统</a></li>
+</ul>
+</nav>
+<section class="hero">
+<div class="logo-monogram">Louis Vuitton</div>
+<h1>销售培训系统</h1>
+<p class="hero-subtitle">Intelligent Agent Training Platform</p>
+<p class="hero-tagline">"The art of selling is the art of helping others buy."</p>
+<div class="scroll-indicator">
+<span>探索更多</span>
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+</div>
+</section>
+<section class="architecture" id="architecture">
+<p class="section-label">System Overview</p>
+<h2 class="section-title">系统架构</h2>
+<p class="section-desc">基于大语言模型的智能销售培训系统，融合多模态 RAG 检索与教练点评能力。</p>
+<div class="arch-grid">
+<div class="arch-card">
+<svg class="arch-icon" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+<h3>Agent 核心</h3>
+<p>基于 ReAct 模式的智能代理，支持多轮对话、工具调用与记忆管理，实现自然语言交互。</p>
+</div>
+<div class="arch-card">
+<svg class="arch-icon" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="M8 7h8M8 11h6"/></svg>
+<h3>RAG 检索系统</h3>
+<p>四层检索架构：关键词搜索、目录索引、FTS5 全文检索、向量语义搜索，智能融合结果。</p>
+</div>
+<div class="arch-card">
+<svg class="arch-icon" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+<h3>教练 Agent</h3>
+<p>专业教练角色，对销售表现进行四维度打分与点评：事实准确性、关键点覆盖、话术质量、行为规范。</p>
+</div>
+<div class="arch-card">
+<svg class="arch-icon" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+<h3>MCP 协议</h3>
+<p>标准化工具调用协议，支持工具发现、动态调用与结果返回，便于扩展与集成。</p>
+</div>
+</div>
+</section>
+<section class="modules" id="modules">
+<p class="section-label">Knowledge Base</p>
+<h2 class="section-title">培训模块</h2>
+<p class="section-desc">涵盖品牌知识、产品介绍、服务礼仪、销售技巧的全方位培训体系。</p>
+<div class="modules-grid">
+<div class="module-card" onclick="this.classList.toggle('active')">
+<span class="module-number">01</span>
+<h3 class="module-title">LV 品牌基础</h3>
+<p class="module-desc">品牌历史、Art of Travel、Monogram、Asnieres 工坊</p>
+<div class="module-content">
+<ul>
+<li>品牌起源（1854）- 旅行箱制作传统</li>
+<li>Monogram 的故事与价值（1896）</li>
+<li>Savoir-faire 工艺精神</li>
+<li>Client Advisor 角色定位</li>
+<li>品牌关键词速查</li>
+</ul>
+</div>
+</div>
+<div class="module-card" onclick="this.classList.toggle('active')">
+<span class="module-number">02</span>
+<h3 class="module-title">LV 产品基础</h3>
+<p class="module-desc">Speedy、Keepall、Alma、Neverfull、Noe、Capucines</p>
+<div class="module-content">
+<ul>
+<li>Speedy - 经典入门款（1930）</li>
+<li>Keepall - 旅行精神代表</li>
+<li>Alma - 巴黎优雅与建筑感</li>
+<li>Speedy P9 - 工艺价值塑造案例</li>
+<li>Neverfull - 大容量实用之选</li>
+<li>Noe - 经典水桶包</li>
+<li>Capucines - 低调奢华高端款</li>
+</ul>
+</div>
+</div>
+<div class="module-card" onclick="this.classList.toggle('active')">
+<span class="module-number">03</span>
+<h3 class="module-title">门店服务礼仪</h3>
+<p class="module-desc">迎宾、观察、展示、试用、包装、告别、售后</p>
+<div class="module-content">
+<ul>
+<li>迎宾 - 营造受欢迎氛围</li>
+<li>保持距离感 - 在场但不打扰</li>
+<li>观察客户 - 生活方式线索</li>
+<li>递拿与展示 - 仪式感呈现</li>
+<li>试背/试用 - 情感连接</li>
+<li>包装与交付 - 体验闭环</li>
+<li>售后接待 - 长期价值保障</li>
+</ul>
+</div>
+</div>
+<div class="module-card" onclick="this.classList.toggle('active')">
+<span class="module-number">04</span>
+<h3 class="module-title">需求挖掘</h3>
+<p class="module-desc">场景判断、开放式提问、风格与预算分析</p>
+<div class="module-content">
+<ul>
+<li>自用/送礼/商务/旅行场景判断</li>
+<li>开放式提问技巧</li>
+<li>复述确认需求</li>
+<li>风格偏好分析</li>
+<li>预算范围了解</li>
+</ul>
+</div>
+</div>
+<div class="module-card" onclick="this.classList.toggle('active')">
+<span class="module-number">05</span>
+<h3 class="module-title">价值塑造与异议处理</h3>
+<p class="module-desc">太贵、网上便宜、比竞品、再想想</p>
+<div class="module-content">
+<ul>
+<li>价格异议处理</li>
+<li>网上/代购对比回应</li>
+<li>竞品对比应对</li>
+<li>决策犹豫支持</li>
+<li>售后保障支撑价值</li>
+</ul>
+</div>
+</div>
+<div class="module-card" onclick="this.classList.toggle('active')">
+<span class="module-number">06</span>
+<h3 class="module-title">送礼推荐策略</h3>
+<p class="module-desc">收礼人分析、节庆场景、个性化定制</p>
+<div class="module-content">
+<ul>
+<li>各类收礼人分析</li>
+<li>节庆场景推荐</li>
+<li>个性化定制服务</li>
+<li>礼品包装说明</li>
+<li>礼品收据处理</li>
+</ul>
+</div>
+</div>
+<div class="module-card" onclick="this.classList.toggle('active')">
+<span class="module-number">07</span>
+<h3 class="module-title">话术对照</h3>
+<p class="module-desc">优秀话术与不佳话术对照，快速掌握标准表达</p>
+<div class="module-content">
+<ul>
+<li>正面范例话术</li>
+<li>反面错误话术</li>
+<li>话术优化建议</li>
+<li>场景化话术参考</li>
+</ul>
+</div>
+</div>
+</div>
+</section>
+<section class="demo-section" id="demo">
+<p class="section-label">Live Demo</p>
+<h2 class="section-title">交互演示</h2>
+<p class="section-desc">体验智能销售培训系统：模拟客户对话与教练实时点评。</p>
+<div class="demo-container">
+<div class="demo-window">
+<div class="demo-header">
+<div class="demo-dots"><span class="demo-dot"></span><span class="demo-dot"></span><span class="demo-dot"></span></div>
+<span class="demo-title">销售培训模拟系统</span>
+</div>
+<div class="demo-body" id="chatContainer">
+<div class="chat-message sales">
+<div class="chat-sender">销售顾问</div>
+<div class="chat-bubble">您好，欢迎光临 Louis Vuitton。今天是想了解哪类产品呢？</div>
+</div>
+<div class="chat-message customer">
+<div class="chat-sender">客户</div>
+<div class="chat-bubble">我想给我先生选一份生日礼物，预算大概在一万多，有什么推荐吗？</div>
+</div>
+<div class="chat-message sales">
+<div class="chat-sender">销售顾问</div>
+<div class="chat-bubble">好的，先生生日礼物非常有心！这个价位的 LV 男士产品有很多选择，比如皮带、钱包、卡包都是经典又实用的礼物。您平时了解先生的风格偏好吗？</div>
+</div>
+<div class="chat-message coach">
+<div class="chat-sender">Coach Agent</div>
+<div class="chat-bubble"><strong>点评：</strong>表现良好<br>需求挖掘到位，询问了风格偏好<br>推荐方向正确（皮带、钱包、卡包）<br>礼物定位恰当<br><span class="score-badge good">评分：85/100</span></div>
+</div>
+<div class="chat-message customer">
+<div class="chat-sender">客户</div>
+<div class="chat-bubble">他比较喜欢简约低调的风格，不喜欢太张扬的设计。</div>
+</div>
+<div class="chat-message sales">
+<div class="chat-sender">销售顾问</div>
+<div class="chat-bubble">明白了，那皮带可能太显眼。钱包和卡包会更适合您先生。说到钱包，Capucines 系列非常适合追求低调奢华的客户，它用的是上乘皮料，整体设计精致优雅，没有明显的 Logo，适合您的需求。</div>
+</div>
+<div class="chat-message coach">
+<div class="chat-sender">Coach Agent</div>
+<div class="chat-bubble"><strong>点评：</strong>产品推荐精准<br>正确识别客户偏好并调整推荐<br>Capucines 定位准确（低调奢华）<br>缺少产品工艺/故事的延伸讲述<br><span class="score-badge warning">评分：78/100</span></div>
+</div>
+</div>
+<div class="demo-input">
+<input type="text" placeholder="输入您的问题..." id="demoInput">
+<button onclick="sendMessage()">发送</button>
+</div>
+</div>
+</div>
+</section>
+<section class="features" id="features">
+<div class="features-grid">
+<div class="feature-item"><div class="feature-number">7</div><h4 class="feature-title">培训模块</h4><p class="feature-desc">全方位知识覆盖</p></div>
+<div class="feature-item"><div class="feature-number">4</div><h4 class="feature-title">RAG 策略</h4><p class="feature-desc">智能检索融合</p></div>
+<div class="feature-item"><div class="feature-number">3</div><h4 class="feature-title">Agent 角色</h4><p class="feature-desc">销售/客户/教练</p></div>
+<div class="feature-item"><div class="feature-number">00</div><h4 class="feature-title">学习迭代</h4><p class="feature-desc">持续优化提升</p></div>
+</div>
+</section>
+<section class="rag-system" id="rag">
+<p class="section-label">Technical Details</p>
+<h2 class="section-title">RAG 检索系统</h2>
+<p class="section-desc">四层检索架构，智能融合多种检索策略，提供精准知识支持。</p>
+<div class="rag-flow">
+<div class="rag-step"><div class="rag-icon"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg></div><h4>Grep Search</h4><p>关键字上下文搜索</p></div>
+<span class="rag-arrow">-</span>
+<div class="rag-step"><div class="rag-icon"><svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg></div><h4>Dirindex</h4><p>目录索引定位</p></div>
+<span class="rag-arrow">-</span>
+<div class="rag-step"><div class="rag-icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg></div><h4>FTS5</h4><p>全文关键词搜索</p></div>
+<span class="rag-arrow">-</span>
+<div class="rag-step"><div class="rag-icon"><svg viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg></div><h4>Vector</h4><p>语义相似性搜索</p></div>
+<span class="rag-arrow">-</span>
+<div class="rag-step"><div class="rag-icon"><svg viewBox="0 0 24 24"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg></div><h4>RRF Fusion</h4><p>多策略结果融合</p></div>
+</div>
+</section>
+<footer>
+<div class="footer-logo">LOUIS VUITTON</div>
+<div class="footer-links">
+<a href="#architecture">系统架构</a>
+<a href="#modules">培训模块</a>
+<a href="#demo">在线演示</a>
+<a href="#rag">技术细节</a>
+</div>
+<p class="footer-copy">LV 销售培训系统 - 基于 MCP 协议与大语言模型</p>
+</footer>
+<script>
+function sendMessage(){var i=document.getElementById('demoInput'),m=i.value.trim();if(!m)return;var c=document.getElementById('chatContainer'),u=document.createElement('div');u.className='chat-message customer';u.innerHTML='<div class="chat-sender">您</div><div class="chat-bubble">'+m+'</div>';c.appendChild(u);i.value='';c.scrollTop=c.scrollHeight;setTimeout(function(){var r=[{s:'销售顾问',t:'sales',msg:'非常好的问题！让我为您详细介绍一下...'}, {s:'Coach Agent',t:'coach',msg:'点评：沟通技巧运用得当 建议增加更多开放式提问来深入了解客户需求。评分：82/100'}];r.forEach(function(x,idx){setTimeout(function(){var el=document.createElement('div');el.className='chat-message '+x.t;if(x.t==='coach'){el.innerHTML='<div class="chat-sender">'+x.s+'</div><div class="chat-bubble"><strong>点评：</strong>'+x.msg.replace('点评：','').replace(/评分：\d+\/100/,'')+'<br><span class="score-badge good">评分：82/100</span></div>'}else{el.innerHTML='<div class="chat-sender">'+x.s+'</div><div class="chat-bubble">'+x.msg+'</div>'}c.appendChild(el);c.scrollTop=c.scrollHeight},idx*1500)})},800)}document.getElementById('demoInput').addEventListener('keypress',function(e){if(e.key==='Enter')sendMessage()});document.querySelectorAll('a[href^="#"]').forEach(function(a){a.addEventListener('click',function(e){e.preventDefault();var t=document.querySelector(this.getAttribute('href'));if(t)t.scrollIntoView({behavior:'smooth',block:'start'})})});
+</script>
+</body>
+</html>
