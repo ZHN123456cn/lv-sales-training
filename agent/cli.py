@@ -79,8 +79,9 @@ def _setup_readline(history_path: Path) -> None:
             "/session new", "/session list", "/session load ",
             "/session info", "/session delete ",
             "/agent list", "/agent create ", "/agent ",
-            "/history", "/clear", "/tools", "/config", 
+            "/history", "/clear", "/tools", "/config",
             "/skills", "/skill ", "/memory", "/mcp list",
+            "/training",
         ]
         def completer(text: str, state: int) -> str | None:
             options = [c for c in SLASH_COMMANDS if c.startswith(text)]
@@ -128,8 +129,10 @@ HELP_TEXT = """
                        将指定每日记忆晋升到长期记忆
   /config              显示当前配置
   /cd <path>           切换工作目录
+  /training            启动 LV 销售训练完整闭环（选场景→对话→教练评估）
 
 直接输入内容即向 Agent 发送消息。
+输入"开始培训"也可直接启动训练流程。
 按 Ctrl+C 或 Ctrl+D 退出。
 """.strip()
 
@@ -245,8 +248,31 @@ class CLI:
             else:
                 self._change_dir(parts[1])
 
+        elif verb == "/training":
+            self._start_training()
+
         else:
             self._err_print(f"未知命令：{verb}（输入 /help 查看可用命令）")
+
+    def _start_training(self) -> None:
+        """启动 LV 销售训练完整闭环（委托给子目录 venv 运行，避免包冲突）。"""
+        import subprocess
+        sub_dir = self._config.project_root / "project_class_all_ragplus"
+        py_exe = sub_dir / ".venv" / "Scripts" / "python.exe"
+        script = sub_dir / "scripts" / "run_training.py"
+        if not py_exe.exists():
+            self._err_print(f"训练环境不存在：{py_exe}\n请先在 {sub_dir} 下创建虚拟环境。")
+            return
+        if not script.exists():
+            self._err_print(f"训练脚本不存在：{script}")
+            return
+        self._sys_print("正在启动训练编排器（子目录环境）...")
+        try:
+            subprocess.run([str(py_exe), str(script)], cwd=str(sub_dir))
+        except KeyboardInterrupt:
+            pass
+        except Exception as exc:
+            self._err_print(f"训练启动失败：{exc}")
 
     def _handle_session_cmd(self, args: list[str]) -> None:
         if not args:
@@ -300,6 +326,12 @@ class CLI:
     # ------------------------------------------------------------------
 
     def _handle_message(self, user_input: str) -> None:
+        # 自然语言触发训练流程
+        training_keywords = ["开始培训", "启动培训", "我要培训", "开始训练", "启动训练", "销售培训", "开始销售培训"]
+        if any(kw in user_input for kw in training_keywords):
+            self._start_training()
+            return
+
         print()
         try:
             # 流式输出最终回答

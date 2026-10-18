@@ -3,10 +3,10 @@
 # API Key 建议放在 .env 文件中（AGENT_API_KEY=xxx），避免提交到版本库。
 
 llm:
-  provider: deepseek                      # 支持: deepseek | openai | custom
+  provider: custom                        # 使用 MiniMax OpenAI 兼容接口
   api_key: ""                             # 留空则从 AGENT_API_KEY 环境变量读取
-  base_url: "https://api.deepseek.com" # DeepSeek 兼容 OpenAI 接口
-  model: "deepseek-v4-pro"
+  base_url: "https://api.minimaxi.com/v1" # MiniMax OpenAI 兼容端点
+  model: "MiniMax-M2.7"
   temperature: 0.7
   timeout: 60
   max_retries: 3
@@ -82,7 +82,7 @@ memory:
       - "(?i)cookie"
 
 mcp:
-  enabled: true
+  enabled: false
   servers:
     filesystem:
       command: "npx"
@@ -91,10 +91,10 @@ mcp:
       env: {}
       timeout: 30
     hello-world:
-      command: "C:/Users/hh/.openclaw/workspace/mcptest/.venv/Scripts/python.exe"
+      command: "python"
       args:
-        - "C:/Users/hh/.openclaw/workspace/mcptest/servermcp/server.py"
-      cwd: "C:/Users/hh/.openclaw/workspace/mcptest"
+        - "servermcp/server.py"
+      cwd: "."
       env: {}
       timeout: 30
     amap-maps:
