@@ -3,12 +3,12 @@
 # API Key 建议放在 .env 文件中（AGENT_API_KEY=xxx），避免提交到版本库。
 
 llm:
-  provider: custom                        # 使用 MiniMax OpenAI 兼容接口
+  provider: custom                        # MiniMax OpenAI 兼容接口
   api_key: ""                             # 留空则从 AGENT_API_KEY 环境变量读取
-  base_url: "https://api.minimaxi.com/v1" # MiniMax OpenAI 兼容端点
+  base_url: "https://api.minimaxi.com/v1" # MiniMax 国内 OpenAI 兼容端点
   model: "MiniMax-M2.7"
   temperature: 0.7
-  timeout: 60
+  timeout: 120
   max_retries: 3
   streaming: true                         # 启用流式输出
 
@@ -82,7 +82,7 @@ memory:
       - "(?i)cookie"
 
 mcp:
-  enabled: false
+  enabled: true
   servers:
     filesystem:
       command: "npx"
@@ -91,10 +91,10 @@ mcp:
       env: {}
       timeout: 30
     hello-world:
-      command: "python"
+      command: "C:/Users/hh/.openclaw/workspace/mcptest/.venv/Scripts/python.exe"
       args:
-        - "servermcp/server.py"
-      cwd: "."
+        - "C:/Users/hh/.openclaw/workspace/mcptest/servermcp/server.py"
+      cwd: "C:/Users/hh/.openclaw/workspace/mcptest"
       env: {}
       timeout: 30
     amap-maps:
