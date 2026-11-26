@@ -25,3 +25,6 @@ class AgentState(TypedDict):
     final_answer: str
     usage: dict[str, int]
     output_stats: dict[str, Any]
+    # 内部标记：call_model 本轮是否产出工具调用。条件边据此分叉到
+    # strip_reasoning / execute_tools。不参与 A/B 对比的公开指标。
+    _has_tool_calls: bool

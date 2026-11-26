@@ -11,5 +11,9 @@ A/B 对比：质量（agent_guard 判定）、延迟、Token 用量。
 """
 
 from .graph import build_graph, LangGraphAgent
+from .training_graph import build_training_graph, run_training_session
 
-__all__ = ["build_graph", "LangGraphAgent"]
+__all__ = [
+    "build_graph", "LangGraphAgent",
+    "build_training_graph", "run_training_session",
+]

@@ -123,3 +123,40 @@ def test_max_iteration_guard():
     assert "最大迭代" in answer
     assert llm.calls == 3
     agent.close()
+
+
+def test_checkpointer_thread_continuity():
+    """同一 thread_id 下两轮对话，第二轮能通过 checkpointer 读到第一轮历史。"""
+    agent, llm = _make_agent([
+        FakeResponse("第一轮回答"),
+        FakeResponse("第二轮回答"),
+    ])
+    agent.run("第一个问题", thread_id="thread-A")
+    # 第二轮：LLM 收到的 messages 里应含第一轮的用户消息与回答
+    captured = {}
+    original_build = agent._loop._context_manager.build_messages
+
+    def spy_build(session, tool_ctx):
+        captured["messages"] = list(session.messages)
+        return original_build(session, tool_ctx)
+
+    agent._loop._context_manager.build_messages = spy_build
+    agent.run("第二个问题", thread_id="thread-A")
+
+    contents = [m.get("content") for m in captured["messages"]]
+    assert "第一个问题" in contents       # 第一轮 user 消息被 checkpoint 记住
+    assert "第一轮回答" in contents        # 第一轮 assistant 回答被记住
+    assert "第二个问题" in contents        # 本轮 user 消息
+    agent.close()
+
+
+def test_strip_reasoning_is_separate_node():
+    """最终回答的思考块由独立 strip_reasoning 节点剥离。"""
+    agent, llm = _make_agent([FakeResponse("<think>内部推理</think>干净回答")])
+    answer = agent.run("测试思考块")
+    assert answer == "干净回答"
+    assert "内部推理" not in answer
+    assert agent.last_output_stats["blocks"] >= 1
+    # 图里确有独立节点
+    assert "strip_reasoning" in agent.graph.get_graph().nodes
+    agent.close()
