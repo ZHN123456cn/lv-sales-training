@@ -64,13 +64,20 @@ class AgentLoop:
         skill_registry: SkillRegistry | None = None,
         memory_store: MarkdownMemoryStore | None = None,
         context_manager: ContextManager | None = None,
+        enabled_tools_override: list[str] | None = None,
     ) -> None:
         self._config = config
         self._session = session
         self._llm = llm
         self._skill_registry = skill_registry or load_skills(config)
         self._memory_store = memory_store if memory_store is not None else build_memory_store(config)
-        self._enabled_tools = list(config.enabled_tools)
+        # 场景级工具白名单（如顾客模拟场景传 [] 彻底禁用工具）。
+        # None 表示沿用全局 config；显式传 [] 表示禁用全部工具且不启动 MCP。
+        tools_disabled = enabled_tools_override is not None and not enabled_tools_override
+        effective_tools = (
+            config.enabled_tools if enabled_tools_override is None else enabled_tools_override
+        )
+        self._enabled_tools = list(effective_tools)
         if self._memory_store is None:
             self._enabled_tools = [
                 name for name in self._enabled_tools
@@ -79,7 +86,7 @@ class AgentLoop:
         self._mcp_manager: MCPManager | None = None
         self._local_tools = get_enabled_tools(self._enabled_tools)
         self._mcp_tools: list[ToolDef] = []
-        if config.mcp.enabled:
+        if config.mcp.enabled and not tools_disabled:
             self._mcp_manager = MCPManager(config)
             self._mcp_manager.start()
             self._mcp_tools = self._mcp_manager.list_tool_defs()

@@ -33,6 +33,30 @@ from ..training_scenarios import build_scenario_brief, get_scenario
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
+# 顾客决定购买时的兜底信号。IDENTITY.md 要求顾客在末尾输出 [[END_TRAINING]]，
+# 但模型偶尔不遵守（标记缺失或跨 token 被吞）。这里在**后端完整文本**上做一次
+# 兜底判定——后端看到的是全量 token，不存在前端逐片段检测被切断的问题。
+END_TRAINING_MARKER = "[[END_TRAINING]]"
+# 只用「明确决策语句」做兜底，不用裸词"包起来"——否则"包起来是什么意思？"
+# 这类询价/理解性问题会误判，过早结束演练。
+# 只用「收尾性」成交话术：意向表达（如"我想买就趁现在"）不算，
+# 否则客户还在看货就会被过早结束演练。精确触发仍靠 [[END_TRAINING]] 标记。
+_PURCHASE_SIGNALS = (
+    "帮我包起来", "包起来吧", "就这款吧", "就这只吧", "就买这个",
+    "我买了", "我就要这个", "决定了", "刷信用卡", "刷卡吧",
+    "开票吧", "那就定这只", "就它了", "那我走了", "拿全新的看看",
+)
+
+
+def detect_purchase_commitment(text: str) -> bool:
+    """判断顾客文本里是否含明确成交信号（标记本身或购买话术）。"""
+    if not text:
+        return False
+    upper = text.upper()
+    if END_TRAINING_MARKER.upper() in upper:
+        return True
+    return any(signal in text for signal in _PURCHASE_SIGNALS)
+
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="用户消息")
@@ -61,8 +85,14 @@ def _run_agent_stream(
     """
     event_queue: "queue.Queue[tuple[str, dict[str, Any]] | None]" = queue.Queue()
     error_holder: list[Exception] = []
+    # 顾客模拟场景：工具事件不推给前端（角色沉浸），但在服务端仍完整记录回答，
+    # 用于兜底检测成交信号。
+    is_customer = session.work_dir == "agent:customer"
+    full_text_parts: list[str] = []
 
     def _on_tool_call(e: ToolCallEvent) -> None:
+        if is_customer:
+            return  # 顾客 Agent 的工具调用是内部行为，不暴露给学员
         args = e.arguments
         args_str = json.dumps(args, ensure_ascii=False)
         if len(args_str) > 1000:
@@ -74,6 +104,8 @@ def _run_agent_stream(
         }))
 
     def _on_tool_result(e: ToolResultEvent) -> None:
+        if is_customer:
+            return
         result = e.result
         truncated = False
         if len(result) > 1500:
@@ -94,6 +126,7 @@ def _run_agent_stream(
                 on_tool_call=_on_tool_call,
                 on_tool_result=_on_tool_result,
             ):
+                full_text_parts.append(token)
                 event_queue.put(("token", {"content": token}))
             event_queue.put(None)  # 结束标记
         except Exception as exc:  # noqa: BLE001
@@ -122,7 +155,11 @@ def _run_agent_stream(
         if manager.config.session.auto_save:
             session_mgr.save_session(session)
 
-        yield _sse_event("done", {"session_id": session.id})
+        done_data: dict[str, Any] = {"session_id": session.id}
+        # 顾客 Agent：在完整文本上统一判定成交，避免前端逐片段检测被切断。
+        if is_customer and detect_purchase_commitment("".join(full_text_parts)):
+            done_data["purchase_detected"] = True
+        yield _sse_event("done", done_data)
 
     except Exception as exc:  # noqa: BLE001
         yield _sse_event("error", {"message": str(exc)})

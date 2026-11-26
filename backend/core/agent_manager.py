@@ -160,11 +160,16 @@ class AgentManager:
         with self._loops_lock:
             loop = self._loops.get(session.id)
             if loop is None:
+                # 顾客模拟场景必须零工具：IDENTITY 要求顾客"完全沉浸角色、不输出思考"，
+                # 任何工具调用（尤其 shell 会触发会话中出现的 🔧 shell 面板）
+                # 都是角色穿帮。用空白名单从源头切断，而不是靠前端隐藏。
+                is_customer = session.work_dir == "agent:customer"
                 loop = AgentLoop(
                     config=self._config,
                     session=session,
                     llm=self.llm,
                     skill_registry=self._skill_registry,
+                    enabled_tools_override=[] if is_customer else None,
                 )
                 self._loops[session.id] = loop
             return loop

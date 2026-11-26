@@ -115,67 +115,12 @@ async function startScenario(scenarioId) {
   }
 }
 
-// ----- 流式 think 标签过滤器 -----
-// 用于在 SSE 流式接收时实时过滤 <think>...</think> 内容和 [[END_TRAINING]] 标记
-function createStreamFilter() {
-  let buffer = ''
-  let inThink = false
-  let detectedEndTraining = false
-  const OPEN_TAG = '<think>'
-  const CLOSE_TAG = '</think>'
-  const END_MARKER = '[[END_TRAINING]]'
-
-  function filter(content) {
-    buffer += content
-    let result = ''
-
-    while (buffer.length > 0) {
-      if (inThink) {
-        const closeIdx = buffer.toLowerCase().indexOf(CLOSE_TAG)
-        if (closeIdx >= 0) {
-          inThink = false
-          buffer = buffer.substring(closeIdx + CLOSE_TAG.length)
-        } else {
-          const keep = Math.min(buffer.length, CLOSE_TAG.length - 1)
-          buffer = buffer.substring(buffer.length - keep)
-          break
-        }
-      } else {
-        const openIdx = buffer.toLowerCase().indexOf(OPEN_TAG)
-        if (openIdx >= 0) {
-          result += buffer.substring(0, openIdx)
-          inThink = true
-          buffer = buffer.substring(openIdx + OPEN_TAG.length)
-        } else {
-          const keep = Math.min(buffer.length, OPEN_TAG.length - 1)
-          if (buffer.length > keep) {
-            result += buffer.substring(0, buffer.length - keep)
-            buffer = buffer.substring(buffer.length - keep)
-          }
-          break
-        }
-      }
-    }
-
-    // 检测并过滤自动结束标记
-    if (result.toUpperCase().includes(END_MARKER)) {
-      detectedEndTraining = true
-      result = result.replace(/\[\[END_TRAINING\]\]/gi, '')
-    }
-    // 也检查 buffer 中是否有结束标记（可能还未输出）
-    if (buffer.toUpperCase().includes(END_MARKER)) {
-      detectedEndTraining = true
-      buffer = buffer.replace(/\[\[END_TRAINING\]\]/gi, '')
-    }
-
-    return result
-  }
-
-  filter.hasEndTraining = () => detectedEndTraining
-  return filter
-}
-
 // ----- 对话（与客户 Agent）-----
+// 注意：<think> 剥离已在后端 reasoning.py 完成（增量过滤 + flush），
+// 前端不得再做一遍——旧版 createStreamFilter 因流结束未 flush 残留 buffer，
+// 导致客户话末尾丢字、[[END_TRAINING]] 被切断检测不到。现已移除。
+// END_TRAINING 判定统一由后端在完整文本上完成，通过 done 事件的
+// purchase_detected 标志下发。
 async function sendMessage(text) {
   if (isStreaming.value) return
   error.value = null
@@ -195,16 +140,15 @@ async function sendMessage(text) {
 
   isStreaming.value = true
   abortController = new AbortController()
-  const filterStream = createStreamFilter()
 
   await streamChat({
     message: text,
     sessionId: sessionId.value,
     signal: abortController.signal,
     onToken: (content) => {
-      const filtered = filterStream(content)
-      if (filtered) {
-        customerMsg.content += filtered
+      // token 已由后端剥掉思考块，直接追加；不再做前端二次过滤（会吞尾字）
+      if (content) {
+        customerMsg.content += content
         scrollToBottom()
       }
     },
@@ -228,12 +172,13 @@ async function sendMessage(text) {
     onDone: (data) => {
       customerMsg.isStreaming = false
       if (data.session_id) sessionId.value = data.session_id
-      // 检测客户是否决定购买（自动结算标记）
-      if (filterStream.hasEndTraining()) {
-        // 延迟一点让用户看到购买意向
+      // 成交判定由后端在完整文本上完成（含 [[END_TRAINING]] 标记与购买话术兜底），
+      // 前端只消费结果，不再逐 token 检测（避免跨 token 切断）。
+      if (data.purchase_detected) {
+        // 延迟一点让用户读完客户的成交话，再进入教练评价
         setTimeout(() => {
           endPractice()
-        }, 1000)
+        }, 1200)
       }
     },
     onError: (msg) => {
