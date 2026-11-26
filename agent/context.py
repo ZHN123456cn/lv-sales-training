@@ -43,6 +43,14 @@ class ContextManager:
         if self._config.identity_text.strip():
             parts.append(f"<identity>\n{self._config.identity_text.strip()}\n</identity>")
 
+        # 场景段（F-20261116-01）：必须每轮重建，不能只在开场白时用一次。
+        # 来源是 config 里的映射（只读共享安全），键取 session.scenario_id。
+        scenario_text = self._config.scenario_prompts.get(
+            getattr(session, "scenario_id", "") or "", ""
+        )
+        if scenario_text.strip():
+            parts.append(f"<scenario>\n{scenario_text.strip()}\n</scenario>")
+
         parts.extend([
             (
                 "Skill rules:\n"

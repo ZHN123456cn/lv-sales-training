@@ -164,6 +164,12 @@ class AgentConfig:
     project_root: Path = field(default_factory=lambda: PROJECT_ROOT)
     agent_scope: AgentScope | None = None
     identity_text: str = ""
+    # 场景正文映射：scenario_id -> 该场景的 <scenario> 段文本。
+    # 必须是**映射**不能是单值字段：AgentManager 的整个生命周期共享同一个
+    # AgentConfig 实例（backend/core/agent_manager.py:143-158），写单值会让
+    # 后创建的会话覆盖先创建的会话（顾客 A 用着顾客 B 的场景，且不报错）。
+    # 只读、按 id 取值，共享是安全的。
+    scenario_prompts: dict[str, str] = field(default_factory=dict)
 
     def resolved_work_dir(self) -> Path:
         """返回绝对工作目录路径。"""

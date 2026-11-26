@@ -14,6 +14,7 @@ from collections.abc import Generator
 from typing import Any
 
 from .config import LLMConfig
+from .http_transport import build_http_client
 
 try:
     from openai import OpenAI
@@ -26,12 +27,21 @@ class LLMClient:
         if OpenAI is None:
             raise RuntimeError("openai package is required to use LLMClient")
         self._config = config
+        # 必须显式注入 transport：默认 client 会声明 br，而本机 brotli 1.0.9
+        # 解不了 br，长输出/流式一律崩。详见 agent/http_transport.py。
+        self._http_client = build_http_client(timeout=config.timeout)
         self._client = OpenAI(
             api_key=config.api_key,
             base_url=config.base_url,
             timeout=config.timeout,
             max_retries=config.max_retries,
+            http_client=self._http_client,
         )
+
+    @property
+    def transport_injected(self) -> bool:
+        """是否成功注入了自定义 transport（False 时长输出可能因 br 解码失败而断）。"""
+        return self._http_client is not None
 
     # ------------------------------------------------------------------
     # 公开接口
@@ -66,8 +76,20 @@ class LLMClient:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+        want_usage = use_stream
 
-        raw = self._client.chat.completions.create(**kwargs)
+        if want_usage:
+            # 流式默认不回 usage；不显式要，成本口径永远是空的。
+            # 但 `stream_options` 是 OpenAI 专有参数，部分兼容端点直接报
+            # TypeError——那时必须回退，不能因为"想记成本"把主流程打挂。
+            try:
+                raw = self._client.chat.completions.create(
+                    **kwargs, stream_options={"include_usage": True}
+                )
+            except TypeError:
+                raw = self._client.chat.completions.create(**kwargs)
+        else:
+            raw = self._client.chat.completions.create(**kwargs)
 
         if use_stream:
             return _StreamingLLMResponse(raw)
@@ -122,10 +144,20 @@ class LLMResponse:
         """将响应转为 messages 格式的 assistant 消息 dict。"""
         raise NotImplementedError
 
+    @property
+    def usage(self) -> dict[str, int] | None:
+        """本次调用的 token 用量；拿不到就返回 None（不要填 0 冒充"没花钱"）。"""
+        return None
+
 
 class _BlockingLLMResponse(LLMResponse):
     def __init__(self, completion: Any) -> None:
         self._msg = completion.choices[0].message
+        self._usage = _extract_usage(getattr(completion, "usage", None))
+
+    @property
+    def usage(self) -> dict[str, int] | None:
+        return self._usage
 
     @property
     def content(self) -> str:
@@ -182,6 +214,17 @@ class _StreamingLLMResponse(LLMResponse):
     def __init__(self, stream: Any) -> None:
         self._chunks: list[Any] = list(stream)
         self._content, self._reasoning_content, self._raw_tool_calls = self._parse_chunks()
+        # 流式的 usage 只出现在最后一个 chunk（且需要 stream_options.include_usage）
+        self._usage: dict[str, int] | None = None
+        for chunk in reversed(self._chunks):
+            found = _extract_usage(getattr(chunk, "usage", None))
+            if found is not None:
+                self._usage = found
+                break
+
+    @property
+    def usage(self) -> dict[str, int] | None:
+        return self._usage
 
     def _parse_chunks(self) -> tuple[str, str, list[dict[str, Any]]]:
         content_parts: list[str] = []
@@ -313,6 +356,21 @@ def _strip_provider_reasoning_fields(message: dict[str, Any]) -> dict[str, Any]:
     msg = dict(message)
     msg.pop("reasoning_content", None)
     return msg
+
+
+def _extract_usage(usage: Any) -> dict[str, int] | None:
+    """把 provider 的 usage 归一成 {prompt, completion}；拿不到返回 None。
+
+    返回 None 而不是 0：0 会被读成"这次调用没花 token"，而 None 才是"没采到"。
+    成本口径里这两件事必须分开，否则报告会给出一个看起来很精确的假数字。
+    """
+    if usage is None:
+        return None
+    prompt = getattr(usage, "prompt_tokens", None)
+    completion = getattr(usage, "completion_tokens", None)
+    if prompt is None and completion is None:
+        return None
+    return {"prompt": int(prompt or 0), "completion": int(completion or 0)}
 
 
 def _get_provider_extra(obj: Any, field: str) -> Any:

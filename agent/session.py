@@ -31,6 +31,9 @@ class SessionMeta:
     created_at: str
     updated_at: str
     work_dir: str = "."
+    # 场景标识（F-20261116-01）：会话必须自己记住"这场是哪个场景"，
+    # 否则 system prompt 每轮重建时无从取用，角色扮演场景形同虚设。
+    scenario_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +42,7 @@ class SessionMeta:
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "work_dir": self.work_dir,
+            "scenario_id": self.scenario_id,
         }
 
     @classmethod
@@ -49,6 +53,7 @@ class SessionMeta:
             created_at=d.get("created_at", ""),
             updated_at=d.get("updated_at", ""),
             work_dir=d.get("work_dir", "."),
+            scenario_id=d.get("scenario_id", ""),
         )
 
 
@@ -60,6 +65,7 @@ class Session:
     title: str = ""
     work_dir: str = "."
     messages: list[dict[str, Any]] = field(default_factory=list)
+    scenario_id: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -69,6 +75,7 @@ class Session:
             "title": self.title,
             "work_dir": self.work_dir,
             "messages": self.messages,
+            "scenario_id": self.scenario_id,
         }
 
     @classmethod
@@ -80,6 +87,7 @@ class Session:
             title=d.get("title", ""),
             work_dir=d.get("work_dir", "."),
             messages=d.get("messages", []),
+            scenario_id=d.get("scenario_id", ""),
         )
 
     def to_meta(self) -> SessionMeta:
@@ -89,6 +97,7 @@ class Session:
             created_at=self.created_at,
             updated_at=self.updated_at,
             work_dir=self.work_dir,
+            scenario_id=self.scenario_id,
         )
 
     def touch(self) -> None:
@@ -121,8 +130,12 @@ class SessionManager:
     # 公开接口
     # ------------------------------------------------------------------
 
-    def new_session(self, work_dir: str = ".") -> Session:
-        """创建并返回新 Session（不自动保存，由调用方决定时机）。"""
+    def new_session(self, work_dir: str = ".", scenario_id: str = "") -> Session:
+        """创建并返回新 Session（不自动保存，由调用方决定时机）。
+
+        `scenario_id` 必须在这里落进 session：后续每轮 `build_messages()`
+        重建 system prompt 时，只能从 session 取"这场是哪个场景"。
+        """
         session_id = _generate_session_id()
         now = _now_iso()
         return Session(
@@ -130,6 +143,7 @@ class SessionManager:
             created_at=now,
             updated_at=now,
             work_dir=work_dir,
+            scenario_id=scenario_id,
         )
 
     def load_session(self, session_id: str) -> Session:
