@@ -10,7 +10,7 @@
 - **三 Agent 协作**：顾客模拟 → 销售训练 → 教练点评，职责拆分 + 契约化交接（`agent/agents.py`）
 - **RAG 4 路检索**：grep / 目录索引 / SQLite FTS5 / 向量检索，RRF 融合
 - **MCP 三协议**：同进程 / 子进程 / HTTP，可插拔接入（`agent/mcp.py`、`clientmcp/`、`servermcp/`）
-- **可验证**：自动化测试套件 + 真实会话记录 + 缺陷分析报告（见下）
+- **可验证**：自动化测试套件 + 缺陷分析报告（见下）；真实会话记录本地留存，仓库不含
 - **完整技术文档**：`DESIGN.md`、`agents_design.md`、`mcp_design.md`、`项目说明.md`
 
 ## 评测与质检（重点）
@@ -58,7 +58,7 @@ python run_frontend.py     # 前端
 ├── project_class_all_ragplus/  # RAG 4 路检索 + RRF
 ├── workspace/          # 知识库（LV / 销售 / 评分标准）
 ├── tests/              # 自动化测试套件
-├── .sessions/          # 真实会话记录（脱敏）
+├── .sessions/          # 真实会话记录（gitignore，本地留存）
 ├── DESIGN.md agents_design.md mcp_design.md  # 架构与设计文档
 └── 项目说明.md
 ```
